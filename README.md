@@ -11,12 +11,81 @@ anywhere on your tailnet.
 
 ## Install
 
+### 1. Add the repository
+
+[![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fdanielcbaldwin%2Fha-paseo)
+
+Or by hand:
+
 1. **Settings → Add-ons → Add-on Store**
 2. Top-right menu (⋮) → **Repositories**
-3. Add `https://github.com/danielcbaldwin/ha-paseo`
-4. Install **Paseo**, set a password in **Configuration**, and start it
+3. Paste `https://github.com/danielcbaldwin/ha-paseo` → **Add** → **Close**
+4. Refresh the store; **Paseo** appears under a new heading
+
+### 2. Configure it
+
+Install **Paseo**, then open the **Configuration** tab. Only one field is
+mandatory:
+
+| Field | Set it to |
+| --- | --- |
+| `password` | Anything you like. The add-on **refuses to start without one** — port 6767 is published on your LAN and the daemon holds a Supervisor token. |
+| `hostnames` | Add any DNS name you'll use. Defaults cover `*.lan`, `*.ts.net` and `homeassistant.local`. IPs always work. |
+
+Everything else has a working default. Save, then **Start**, and watch the
+**Log** tab for `starting Paseo`.
+
+### 3. Connect a client
+
+There's no sidebar panel — [see why](#two-things-worth-knowing-up-front). Pick one:
+
+- **Paseo app over Tailscale/LAN** (recommended) — Settings → Add host →
+  Direct connection. Host = your HA box's IP, Port = `6767`, **SSL off**,
+  password as configured. No pairing link needed.
+- **Relay** — set `relay_enabled: true`, restart, and the join URL is printed
+  in the add-on **Log**.
+- **Browser** — the **Open Web UI** button on the add-on page.
+
+### 4. Log in to the agents
+
+Open a **terminal pane** in a Paseo workspace and run:
+
+```bash
+agent-login
+```
+
+It reports which providers are authenticated and prints the exact command for
+the ones that aren't. Credentials persist across restarts and add-on updates, so
+this is a one-time job.
+
+`claude`, `opencode auth login` and `copilot login` all work headlessly.
+**Codex** and **Gemini** need a little help —
+[see the login guide](paseo/DOCS.md#logging-the-agents-in).
+
+### 5. Try it
+
+In the **Home Assistant** workspace (registered automatically), start an agent
+and ask it something real:
+
+```
+What lights are on right now?
+```
+
+It should reach for `ha-inventory` rather than guessing entity ids.
+
+---
 
 Full documentation: [`paseo/DOCS.md`](paseo/DOCS.md).
+
+### If installation fails
+
+| Symptom | Cause |
+| --- | --- |
+| Repository adds but no add-on appears | Refresh the store, or reload the page. Check the repo URL has no trailing slash. |
+| "Repository is not valid" / clone error | Supervisor clones anonymously — the repository must be publicly readable. |
+| Install fails pulling the image | The GHCR package must be public too, and a release must have been published for your architecture. |
+| Add-on installs but won't start | Check the **Log**. An empty `password` is the usual cause. |
+| Not offered at all on your machine | `armv7`/32-bit ARM is unsupported — upstream Paseo publishes no 32-bit build. |
 
 ## What you get
 

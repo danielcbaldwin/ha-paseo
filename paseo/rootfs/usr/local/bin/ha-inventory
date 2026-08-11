@@ -115,7 +115,8 @@ case "${1:-summary}" in
     areas)       cmd_areas ;;
     state)       shift; cmd_state "$@" ;;
     -h|--help|help)
-        sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+        # Print the header comment block, stopping at the first non-comment line.
+        awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "$0" ;;
     *)
         printf 'unknown subcommand: %s (try --help)\n' "$1" >&2; exit 2 ;;
 esac

@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+#
+# Update the agent CLIs without waiting for an add-on release.
+#
+# The image ships pinned versions in /usr/local. This installs newer ones into
+# /data/home/.npm-global, which comes first on PATH and lives on the persistent
+# volume -- so an update survives restarts AND add-on updates.
+#
+# That persistence is the catch: once a CLI is installed here it SHADOWS the
+# image copy permanently, and future add-on updates will no longer change the
+# version you actually run. `update-agents status` shows when that is happening,
+# and `update-agents reset` undoes it.
+#
+#   update-agents status          what is installed, and what is shadowing what
+#   update-agents all             update every agent CLI to latest
+#   update-agents claude          update one (claude|codex|opencode|copilot|gemini)
+#   update-agents claude@2.1.300  pin one to an exact version
+#   update-agents reset           drop the overrides, go back to image versions
+
+set -euo pipefail
+
+PREFIX="${NPM_CONFIG_PREFIX:-/data/home/.npm-global}"
+IMAGE_PREFIX=/usr/local
+
+declare -A PKG=(
+    [claude]=@anthropic-ai/claude-code
+    [codex]=@openai/codex
+    [opencode]=opencode-ai
+    [copilot]=@github/copilot
+    [gemini]=@google/gemini-cli
+)
+
+log()   { printf '%s\n' "$*"; }
+fatal() { printf 'update-agents: %s\n' "$*" >&2; exit 1; }
+
+if [[ "$(id -u)" == "0" ]]; then
+    fatal "run this as the paseo user, not root (it writes to $PREFIX)"
+fi
+
+pkg_version() { # pkg_version <prefix> <package>
+    # `.dependencies` is absent entirely when the prefix has nothing installed,
+    # so guard with // {} rather than letting jq error and fall through to a
+    # second value on the ||  branch -- that produced a two-line result and
+    # wrecked the column alignment.
+    local out=""
+    out="$(NPM_CONFIG_PREFIX="$1" npm ls -g --depth=0 --json 2>/dev/null \
+           | jq -r --arg p "$2" '((.dependencies // {})[$p].version) // "-"' 2>/dev/null)" || true
+    out="${out%%$'\n'*}"
+    printf '%s' "${out:--}"
+}
+
+cmd_status() {
+    printf '%-10s %-28s %-12s %-12s %s\n' AGENT PACKAGE IMAGE OVERRIDE ACTIVE
+    local name pkg img ovr active
+    for name in claude codex opencode copilot gemini; do
+        pkg="${PKG[$name]}"
+        img="$(pkg_version "$IMAGE_PREFIX" "$pkg")"
+        ovr="$(pkg_version "$PREFIX" "$pkg")"
+        active="$(command -v "$name" 2>/dev/null || echo '-')"
+        case "$active" in
+            "${PREFIX}"/*) active="override" ;;
+            "${IMAGE_PREFIX}"/*) active="image" ;;
+            -) active="missing" ;;
+            *) active="$active" ;;
+        esac
+        printf '%-10s %-28s %-12s %-12s %s\n' "$name" "$pkg" "$img" "$ovr" "$active"
+    done
+
+    if NPM_CONFIG_PREFIX="$PREFIX" npm ls -g --depth=0 --json 2>/dev/null \
+        | jq -e '(.dependencies // {}) | length > 0' >/dev/null 2>&1; then
+        cat <<EOF
+
+Note: overrides are present. Those versions are pinned in /data and will NOT
+change when you update the add-on. Run 'update-agents reset' to go back to the
+versions shipped with the image.
+EOF
+    fi
+}
+
+install_one() { # install_one <name>[@version]
+    local spec="$1" name="${1%%@*}" want="latest"
+    if [[ "$spec" == *@* ]]; then
+        want="${spec#*@}"
+    fi
+    [[ -n "${PKG[$name]:-}" ]] || fatal "unknown agent '$name' (claude|codex|opencode|copilot|gemini)"
+
+    log "installing ${PKG[$name]}@${want} into ${PREFIX} ..."
+    NPM_CONFIG_PREFIX="$PREFIX" npm install -g --no-fund --no-audit "${PKG[$name]}@${want}"
+    log "  now: $(pkg_version "$PREFIX" "${PKG[$name]}")"
+}
+
+cmd_reset() {
+    local name pkg removed=0
+    for name in claude codex opencode copilot gemini; do
+        pkg="${PKG[$name]}"
+        if [[ "$(pkg_version "$PREFIX" "$pkg")" != "-" ]]; then
+            log "removing override: $pkg"
+            NPM_CONFIG_PREFIX="$PREFIX" npm uninstall -g "$pkg" >/dev/null 2>&1 || true
+            removed=1
+        fi
+    done
+    if [[ "$removed" == 0 ]]; then
+        log "no overrides installed; already using the image versions"
+    else
+        log "done -- image versions are active again"
+    fi
+}
+
+case "${1:-status}" in
+    status|"") cmd_status ;;
+    reset)     cmd_reset ;;
+    all)
+        for n in claude codex opencode copilot gemini; do install_one "$n"; done
+        log; cmd_status ;;
+    -h|--help|help)
+        awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "$0" ;;
+    *)
+        for spec in "$@"; do install_one "$spec"; done
+        log; cmd_status ;;
+esac

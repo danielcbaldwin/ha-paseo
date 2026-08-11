@@ -114,7 +114,7 @@ check "provider_overrides merged" sh -c "jq -e '.agents.providers.claude.label =
 
 # ---------------------------------------------------------------------------
 step "4. Tooling on PATH"
-for bin in claude codex opencode ha gh git jq rg python3 hass-api; do
+for bin in claude codex opencode gemini copilot ha gh git jq rg python3 hass-api update-agents; do
     check "$bin" in_container sh -lc "command -v $bin"
 done
 
@@ -147,6 +147,15 @@ check "opencode: HA mcp server" \
 # content and not an empty file from a botched copy.
 check "guide is substantial" \
     sh -c "[ \"\$(docker exec $NAME sh -c 'wc -l < /usr/share/ha-paseo/home-assistant.md')\" -gt 50 ]"
+
+# Debian's /etc/profile hardcodes PATH; a Paseo terminal pane is a login shell,
+# so without the profile.d fix the wrapper and override dirs vanish there.
+check "login shell keeps /share/paseo/bin on PATH" \
+    sh -c "docker exec $NAME gosu paseo bash -lc 'echo \$PATH' | grep -q /share/paseo/bin"
+check "login shell keeps npm-global on PATH" \
+    sh -c "docker exec $NAME gosu paseo bash -lc 'echo \$PATH' | grep -q /data/home/.npm-global/bin"
+check "update-agents status runs" \
+    sh -c "docker exec $NAME gosu paseo update-agents status | grep -q gemini"
 
 # ---------------------------------------------------------------------------
 step "7. Restart persistence"

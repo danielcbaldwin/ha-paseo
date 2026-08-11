@@ -4,9 +4,19 @@
 
 Initial release. Packages Paseo 0.3.1 as a Home Assistant add-on.
 
-- Built on `ghcr.io/getpaseo/paseo`, pinned by digest
-- Bundles `claude`, `codex`, `opencode` and `copilot`, plus `ha`, `gh`,
-  `ripgrep`, `jq` and `python3`
+- Built on `ghcr.io/getpaseo/paseo`, pinned to an exact release tag
+- Bundles `claude`, `codex`, `opencode`, `copilot` and `gemini` at pinned
+  versions, plus `ha`, `gh`, `ripgrep`, `jq` and `python3`
+- `update-agents` to move any agent CLI ahead of the image without waiting for
+  an add-on release; overrides persist across add-on updates and
+  `update-agents status` flags when one is shadowing the image version
+- `auto_update_agents` option to do that on every boot (off by default)
+- Weekly `check-updates` workflow that files an issue when any pin falls behind
+- Relay join URL printed to the add-on log at startup (`print_pairing_link`),
+  since getting a shell into an add-on is awkward
+- `/etc/profile.d` fix so login shells (Paseo terminal panes) keep
+  `/share/paseo/bin` and the npm override dir on `PATH` — Debian's
+  `/etc/profile` hardcodes `PATH` and would otherwise drop both
 - All state relocated to `/data/home` so credentials and history survive add-on
   updates, rather than landing on the anonymous `/home/paseo` volume
 - `/homeassistant` mapped read/write and registered as a Paseo workspace

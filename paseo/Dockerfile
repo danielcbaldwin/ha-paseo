@@ -17,6 +17,18 @@ ARG BUILD_VERSION=dev
 ARG HA_CLI_VERSION=5.3.0
 ARG GH_CLI_VERSION=2.97.0
 
+# Agent CLI versions are pinned so a rebuild of a given add-on version always
+# produces the same image. Unpinned `npm install -g` would silently ship
+# whatever happened to be latest on build day, which makes "0.3.1-1" mean
+# different things on different days. Bumped deliberately; see DOCS.md,
+# "Keeping things up to date". The check-updates workflow files an issue when
+# any of these fall behind.
+ARG CLAUDE_CODE_VERSION=2.1.227
+ARG CODEX_VERSION=0.147.0
+ARG OPENCODE_VERSION=1.18.16
+ARG COPILOT_VERSION=1.0.79
+ARG GEMINI_CLI_VERSION=0.54.4
+
 # Upstream's entrypoint owns the privilege drop to uid 1000, so this image
 # must stay root at the end. See the Docker page of the Paseo docs.
 USER root
@@ -69,14 +81,16 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 RUN set -eux; \
     npm install -g --no-fund --no-audit \
-        @anthropic-ai/claude-code \
-        @openai/codex \
-        opencode-ai \
-        @github/copilot; \
+        "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+        "@openai/codex@${CODEX_VERSION}" \
+        "opencode-ai@${OPENCODE_VERSION}" \
+        "@github/copilot@${COPILOT_VERSION}" \
+        "@google/gemini-cli@${GEMINI_CLI_VERSION}"; \
     npm cache clean --force; \
     claude --version; \
     codex --version; \
-    opencode --version
+    opencode --version; \
+    gemini --version
 
 # ---------------------------------------------------------------------------
 # Relocate every mutable state path off the anonymous /home/paseo volume.
@@ -118,7 +132,8 @@ RUN chmod +x /usr/local/bin/ha-paseo-entrypoint \
              /usr/local/bin/ha-paseo-seed-config \
              /usr/local/bin/ha-paseo-postboot \
              /usr/local/bin/hass-api \
-             /usr/local/bin/ha-inventory
+             /usr/local/bin/ha-inventory \
+             /usr/local/bin/update-agents
 
 LABEL \
     io.hass.name="Paseo" \

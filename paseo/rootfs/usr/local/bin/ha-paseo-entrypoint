@@ -60,6 +60,8 @@ if [[ "$provider_overrides" == "{}" ]] \
 fi
 extra_npm="$(jq -r '(.extra_npm_packages // []) | join(" ")' "$OPTIONS_FILE")"
 extra_apt="$(jq -r '(.extra_apt_packages // []) | join(" ")' "$OPTIONS_FILE")"
+auto_update_agents="$(opt_json '.auto_update_agents' 'false')"
+print_pairing_link="$(opt_json '.print_pairing_link' 'true')"
 
 # An explicit -e PASEO_PASSWORD wins, so the image can be exercised locally
 # without writing an options file.
@@ -144,6 +146,15 @@ if [[ -n "$extra_npm" ]]; then
         || warn "one or more extra_npm_packages failed to install"
 fi
 
+# Opt-in: pull the latest agent CLIs at every boot instead of using the versions
+# pinned in the image. Costs a slow, network-dependent start and gives up
+# reproducibility, which is why it is off by default.
+if [[ "$auto_update_agents" == "true" ]]; then
+    log "auto_update_agents is on; updating agent CLIs to latest"
+    gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/update-agents all \
+        || warn "agent auto-update failed; continuing with the versions already installed"
+fi
+
 # ---------------------------------------------------------------------------
 # Paseo config
 #
@@ -169,13 +180,13 @@ if [[ "$expose_ha_config" == "true" ]]; then
     fi
 fi
 
-# Register /homeassistant as a workspace once the daemon answers. This cannot
-# happen before the handoff -- `paseo workspace create` talks to a running
-# daemon -- so it runs in the background and polls the unauthenticated
-# /api/health route.
-if [[ "$expose_ha_config" == "true" && -d /homeassistant ]]; then
-    gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-postboot register-workspace &
-fi
+# Anything needing a live daemon -- registering the /homeassistant workspace and
+# printing the pairing link -- has to wait until after the handoff below, so it
+# runs in the background polling the unauthenticated /api/health route.
+EXPOSE_HA_CONFIG="$expose_ha_config" \
+PRINT_PAIRING_LINK="$print_pairing_link" \
+RELAY_ENABLED="$relay_enabled" \
+gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-postboot after-start &
 
 log "starting Paseo (state in ${PASEO_HOME}, workspaces in ${workspace_root})"
 

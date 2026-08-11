@@ -21,7 +21,8 @@ Full documentation: [`paseo/DOCS.md`](paseo/DOCS.md).
 ## What you get
 
 - Paseo daemon on `:6767` — API, WebSocket and web UI on one origin
-- `claude`, `codex`, `opencode`, `copilot` preinstalled
+- `claude`, `codex`, `opencode`, `copilot` and `gemini` preinstalled, pinned,
+  and updatable on demand with `update-agents`
 - `ha`, `gh`, `git`, `jq`, `ripgrep`, `python3` for actually getting work done
 - `/homeassistant` mapped read/write and registered as a workspace
 - `hass-api`, an authenticated wrapper over the Core REST API

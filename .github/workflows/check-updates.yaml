@@ -1,0 +1,95 @@
+---
+name: Check for upstream updates
+
+# Everything this add-on ships is pinned, which is good for reproducibility and
+# bad for staleness -- nothing tells you when Paseo or an agent CLI has moved on.
+# This does: it compares the pins against upstream weekly and keeps a single
+# issue up to date with whatever has fallen behind.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays, off the hour to avoid the stampede
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare pinned versions against upstream
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          pinned_arg() {   # read an ARG default out of the Dockerfile
+            sed -n "s/^ARG $1=//p" paseo/Dockerfile | head -1
+          }
+          npm_latest() { npm view "$1" version 2>/dev/null || echo "?"; }
+          gh_latest()  { gh api "repos/$1/releases/latest" --jq '.tag_name' 2>/dev/null || echo "?"; }
+
+          # Paseo itself is pinned as a tag in build.yaml.
+          paseo_pinned="$(sed -n 's|.*ghcr.io/getpaseo/paseo:||p' paseo/build.yaml | head -1)"
+          paseo_latest="$(gh_latest getpaseo/paseo | sed 's/^v//')"
+
+          rows=""
+          add_row() { # add_row <name> <pinned> <latest>
+            if [ "$2" != "$3" ] && [ "$3" != "?" ] && [ -n "$3" ]; then
+              rows="${rows}| \`$1\` | $2 | **$3** |"$'\n'
+            fi
+          }
+
+          add_row "paseo (build.yaml)"        "$paseo_pinned"                      "$paseo_latest"
+          add_row "@anthropic-ai/claude-code" "$(pinned_arg CLAUDE_CODE_VERSION)"  "$(npm_latest @anthropic-ai/claude-code)"
+          add_row "@openai/codex"             "$(pinned_arg CODEX_VERSION)"        "$(npm_latest @openai/codex)"
+          add_row "opencode-ai"               "$(pinned_arg OPENCODE_VERSION)"     "$(npm_latest opencode-ai)"
+          add_row "@github/copilot"           "$(pinned_arg COPILOT_VERSION)"      "$(npm_latest @github/copilot)"
+          add_row "@google/gemini-cli"        "$(pinned_arg GEMINI_CLI_VERSION)"   "$(npm_latest @google/gemini-cli)"
+          add_row "home-assistant/cli"        "$(pinned_arg HA_CLI_VERSION)"       "$(gh_latest home-assistant/cli)"
+          add_row "cli/cli (gh)"              "$(pinned_arg GH_CLI_VERSION)"       "$(gh_latest cli/cli | sed 's/^v//')"
+
+          if [ -z "$rows" ]; then
+            echo "everything is current"
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "body<<EOF"
+            echo "The following pins are behind upstream:"
+            echo
+            echo "| Component | Pinned | Latest |"
+            echo "| --- | --- | --- |"
+            printf '%s' "$rows"
+            echo
+            echo "To update: bump the value in \`paseo/Dockerfile\` (or \`paseo/build.yaml\`"
+            echo "for Paseo itself, including the digest comment), bump \`version\` in"
+            echo "\`paseo/config.yaml\`, add a \`CHANGELOG.md\` entry, then tag the release."
+            echo
+            echo "_Updated automatically by the check-updates workflow._"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "stale=true" >> "$GITHUB_OUTPUT"
+
+      - name: File or refresh the tracking issue
+        if: steps.check.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BODY: ${{ steps.check.outputs.body }}
+        run: |
+          set -euo pipefail
+          title="Upstream updates available"
+          existing="$(gh issue list --state open --search "$title in:title" \
+                        --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body "$BODY"
+            echo "updated issue #$existing"
+          else
+            gh issue create --title "$title" --body "$BODY"
+          fi

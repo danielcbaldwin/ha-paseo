@@ -353,21 +353,26 @@ Intercepting every caller needs a **real executable earlier on `PATH`**. The
 ```yaml
 shims:
   - name: claude
-    command: teamclaude run --no-mitm --
-    passthrough:
-      - --version
-      - -v
-      - auth
-      - doctor
-      - mcp
-      - update
+    env_from: teamclaude env --no-mitm
+    passthrough: ["--version", "-v", "auth", "doctor", "mcp", "update"]
 ```
 
 | Field | Meaning |
 | --- | --- |
 | `name` | Command to intercept. Must be a plain filename; `../` is rejected. |
-| `command` | What to run instead. The caller's arguments are appended. |
+| `env_from` | Run this, `eval` its stdout, then exec the **real** command. For proxies and account routers. |
+| `command` | Run this **instead**. The caller's arguments are appended. |
+| `script` | A full shell body, with `"$@"` and `$REAL` in scope. Escape hatch. |
 | `passthrough` | First arguments that bypass the wrapper and go straight to the real binary. |
+
+Use exactly one of `env_from`, `command` or `script`.
+
+**Prefer `env_from` for proxies.** A wrapper that *replaces* the command — such
+as `command: teamclaude run --`— inserts another process and lets that process
+write to stdout. Paseo speaks a **stdio protocol** to its agents, so a single
+stray line (`teamclaude run` prints `Created config at …` on first use) derails
+the session and it hangs. `env_from` sets environment and then execs the real
+binary, leaving stdout byte-identical — which the test suite asserts.
 
 Shims are written to `/run/ha-paseo/shims`, which is **first on `PATH`** — ahead
 of `/share/paseo/bin`, `update-agents` overrides and the bundled CLIs. They are
@@ -398,7 +403,7 @@ services:
 
 shims:
   - name: claude
-    command: teamclaude run --no-mitm --
+    env_from: teamclaude env --no-mitm
     passthrough: ["--version", "-v", "auth", "doctor", "mcp", "update"]
 ```
 

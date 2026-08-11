@@ -32,9 +32,15 @@ while IFS= read -r entry; do
 
     name="$(jq -r '.name // empty' <<<"$entry")"
     command_line="$(jq -r '.command // empty' <<<"$entry")"
+    env_from="$(jq -r '.env_from // empty' <<<"$entry")"
+    script_body="$(jq -r '.script // empty' <<<"$entry")"
 
-    if [[ -z "$name" || -z "$command_line" ]]; then
-        warn "shim entry needs both 'name' and 'command'; skipping: ${entry}"
+    if [[ -z "$name" ]]; then
+        warn "shim entry needs a 'name'; skipping: ${entry}"
+        continue
+    fi
+    if [[ -z "$command_line" && -z "$env_from" && -z "$script_body" ]]; then
+        warn "shim '${name}' needs one of 'command', 'env_from' or 'script'; skipping"
         continue
     fi
     # A shim called ../something would escape the directory.
@@ -70,12 +76,37 @@ while IFS= read -r entry; do
             printf '    if [[ -n "$REAL" ]]; then exec "$REAL" "$@"; fi ;;\n'
             printf 'esac\n\n'
         fi
-        printf 'exec %s "$@"\n' "$command_line"
+        if [[ -n "$script_body" ]]; then
+            # Full control. "$@" and $REAL are in scope.
+            printf '%s\n' "$script_body"
+        elif [[ -n "$env_from" ]]; then
+            # Set environment, then run the ORIGINAL command. This is the shape
+            # a proxy wants: `teamclaude run` would insert another process and
+            # write its own chatter to stdout, which corrupts the stdio protocol
+            # Paseo speaks to agents over.
+            printf '# Evaluate environment from a helper, then exec the real binary.\n'
+            printf 'if out="$(%s 2>/dev/null)"; then\n' "$env_from"
+            printf '    eval "$out"\n'
+            printf 'fi\n'
+            printf 'if [[ -z "$REAL" ]]; then\n'
+            printf '    echo "shim %s: cannot find the real binary on PATH" >&2\n' "$name"
+            printf '    exit 127\n'
+            printf 'fi\n'
+            printf 'exec "$REAL" "$@"\n'
+        else
+            printf 'exec %s "$@"\n' "$command_line"
+        fi
     } > "${SHIM_DIR}/${name}"
 
     chmod 0755 "${SHIM_DIR}/${name}"
     count=$(( count + 1 ))
-    log "shim '${name}' -> ${command_line}"
+    if [[ -n "$script_body" ]]; then
+        log "shim '${name}' -> custom script"
+    elif [[ -n "$env_from" ]]; then
+        log "shim '${name}' -> env from '${env_from}', then the real ${name}"
+    else
+        log "shim '${name}' -> ${command_line}"
+    fi
 done < <(jq -c '.[]? | select(type == "object")' <<<"$SHIMS_JSON" 2>/dev/null)
 
 if (( count > 0 )); then

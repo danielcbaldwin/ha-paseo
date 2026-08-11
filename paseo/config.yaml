@@ -111,6 +111,8 @@ schema:
     - str
   shims:
     - name: str
-      command: str
+      command: str?
+      env_from: str?
+      script: str?
       passthrough:
         - str?

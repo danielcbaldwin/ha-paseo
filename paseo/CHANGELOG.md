@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1-8
+
+- **Fixed the recommended TeamClaude shim, which hung.** `command: teamclaude
+  run --` inserts another process that writes to stdout, and Paseo speaks a
+  stdio protocol to its agents — one stray line (`Created config at …` on first
+  use) derails the session.
+- Shims gain **`env_from`**: run a helper, `eval` its stdout, then exec the
+  *real* binary. Stdout stays byte-identical, which is what a proxy wrapper
+  needs. This is the shape TeamClaude's own help recommends for "agent
+  multiplexers that spawn claude themselves".
+- Shims also gain **`script`** for a full shell body when neither fits.
+
 ## 0.3.1-7
 
 - **`shims`** — intercept a command name (typically `claude`) with a wrapper,

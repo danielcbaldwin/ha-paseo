@@ -304,6 +304,8 @@ rm -rf "$shimdir"; mkdir -p "$shimdir"/{data,share}
 cat > "${shimdir}/data/options.json" <<'SHIMEOF'
 {"connection_mode":"local","password":"verifyshimpassword1234",
  "shims":[{"name":"claude","command":"echo WRAPPED real=$REAL","passthrough":["--version"]},
+          {"name":"env","env_from":"echo export SHIM_ENV_OK=1"},
+          {"name":"jq","env_from":"echo export SHIM_ENV_OK=1"},
           {"name":"../evil","command":"echo nope"}]}
 SHIMEOF
 docker rm -f "${NAME}-shim" >/dev/null 2>&1 || true
@@ -322,6 +324,16 @@ check "passthrough args reach the real binary" \
     sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'claude --version' | grep -q 'Claude Code'"
 check "unsafe shim name rejected" \
     sh -c "docker logs ${NAME}-shim 2>&1 | grep -q 'invalid shim name'"
+# The reason `teamclaude run` hangs Paseo: it writes its own chatter to stdout,
+# and Paseo speaks a stdio protocol to agents. A wrapper must be transparent.
+check "env_from applies the environment and execs the real binary" \
+    sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'env' | grep -q '^SHIM_ENV_OK=1$'"
+# The reason the first TeamClaude recipe hung: a wrapper that replaces the
+# command lets another process write to stdout, and Paseo speaks a stdio
+# protocol to agents. env_from must be completely transparent.
+check "env_from shim leaves stdout byte-identical to the real binary" \
+    sh -c "[ \"\$(docker exec ${NAME}-shim gosu paseo bash -lc 'jq --version')\" \
+          = \"\$(docker exec ${NAME}-shim /usr/bin/jq --version)\" ]"
 check "shims live outside /share and /data" \
     sh -c "! test -e '${shimdir}/share/paseo/bin/claude' && ! test -e '${shimdir}/data/claude'"
 docker rm -f "${NAME}-shim" >/dev/null 2>&1 || true

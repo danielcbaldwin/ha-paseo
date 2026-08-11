@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1-10
+
+- **`ha-paseo-doctor`** — one command that dumps live state: bind address and
+  mode, daemon health, every shim and the binary it resolves to, whether each
+  configured service is actually running, listening ports, per-container proxy
+  credentials, and where each agent CLI resolves from.
+
+  The add-on log is a poor diagnostic surface — at `log_level: debug` the daemon
+  floods it and the startup lines are gone in seconds. This reads current state
+  instead.
+
 ## 0.3.1-9
 
 Three real bugs in the shim support added in 0.3.1-7/-8, all of which could

@@ -136,7 +136,10 @@ RUN chmod +x /usr/local/bin/ha-paseo-entrypoint \
              /usr/local/bin/update-agents \
              /usr/local/bin/agent-login \
              /usr/local/bin/ha-paseo-services \
-             /usr/local/bin/ha-paseo-shims
+             /usr/local/bin/ha-paseo-shims \
+             /usr/local/bin/ha-paseo-doctor
+
+RUN printf '{"version":"%s"}\n' "${BUILD_VERSION}" > /etc/ha-paseo-release
 
 LABEL \
     io.hass.name="Paseo" \

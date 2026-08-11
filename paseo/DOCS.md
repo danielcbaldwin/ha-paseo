@@ -643,6 +643,44 @@ is exactly what happened releasing `0.3.1-2`. Releasing is now just:
 
 ---
 
+## Diagnosing: `ha-paseo-doctor`
+
+Run it from a terminal pane. It reads **live state**, so it does not matter how
+long ago the add-on started — with `log_level: debug` the daemon floods the log
+and the startup lines scroll away within seconds.
+
+```
+$ ha-paseo-doctor
+
+Add-on
+          version   0.3.1-10
+          listen    0.0.0.0:6767
+          mode      relay
+          password  (blank)
+
+Daemon
+  OK      responding on 127.0.0.1:6767
+
+Shims
+  OK      claude -> /usr/local/bin/claude  (require_port 3456)
+
+Services
+  PROBLEM NOT running: teamclaude server --headless
+
+TeamClaude (this container -- NOT your desktop)
+  PROBLEM no accounts configured here -- run 'teamclaude login' in this terminal
+  PROBLEM proxy NOT listening on 3456
+```
+
+It covers the things that are otherwise invisible: whether a shim is actually
+in effect for a given command name, whether a service is running or
+crash-looping, which ports are listening, and whether per-container credentials
+exist.
+
+**Accounts are per-machine.** A proxy like TeamClaude keeps its accounts in its
+own config inside this container (`/data/home/.config/`). Logging in on your
+desktop does not carry over — you must log in once from a terminal pane here.
+
 ## Troubleshooting
 
 | Symptom | Cause |

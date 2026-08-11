@@ -351,6 +351,12 @@ check "require_port skips the eval when the port is closed" \
     sh -c "! docker exec ${NAME}-shim gosu paseo bash -lc 'printenv' | grep -q '^SHIM_PORT_OK=1$'"
 check "the real binary still runs when the eval is skipped" \
     sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'printenv HOME' | grep -q /data/home"
+check "doctor reports shim state and a dead require_port" \
+    sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'ha-paseo-doctor' | grep -q 'require_port 9999'"
+check "doctor resolves a target shim to its absolute binary" \
+    sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'ha-paseo-doctor' | grep -q 'printenv -> /usr/bin/printenv'"
+check "doctor shows which binary an intercepted name resolves to" \
+    sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'ha-paseo-doctor' | grep -qE 'claude +/run/ha-paseo/shims/claude'"
 check "shims live outside /share and /data" \
     sh -c "! test -e '${shimdir}/share/paseo/bin/claude' && ! test -e '${shimdir}/data/claude'"
 docker rm -f "${NAME}-shim" >/dev/null 2>&1 || true

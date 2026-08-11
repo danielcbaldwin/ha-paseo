@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+#
+# Print everything needed to diagnose this add-on in one shot.
+#
+# The add-on log is a poor diagnostic surface: with log_level debug the daemon
+# floods it and the handful of startup lines scroll away within seconds. This
+# reads live state instead, so it does not matter how long ago the add-on
+# started.
+#
+#   ha-paseo-doctor
+
+set -uo pipefail
+
+SHIM_DIR=/run/ha-paseo/shims
+OPTIONS=/data/options.json
+
+hdr()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
+ok()   { printf '  \033[32m%-7s\033[0m %s\n' "OK" "$*"; }
+bad()  { printf '  \033[31m%-7s\033[0m %s\n' "PROBLEM" "$*"; }
+info() { printf '  %-7s %s\n' "" "$*"; }
+
+port_open() { (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null && { exec 3<&- 3>&-; return 0; }; return 1; }
+
+hdr "Add-on"
+info "version   $(jq -r '.version // "?"' /etc/ha-paseo-release 2>/dev/null || echo "?")"
+info "listen    ${PASEO_LISTEN:-unset}"
+info "home      ${HOME:-unset}"
+if [[ -f "$OPTIONS" ]]; then
+    info "mode      $(jq -r '.connection_mode // "relay"' "$OPTIONS")"
+    pw="$(jq -r '.password // ""' "$OPTIONS")"
+    info "password  $([[ -n "$pw" ]] && echo set || echo "(blank)")"
+fi
+
+hdr "Daemon"
+if curl -fsS --max-time 3 http://127.0.0.1:6767/api/health >/dev/null 2>&1; then
+    ok "responding on 127.0.0.1:6767"
+else
+    bad "not responding on 127.0.0.1:6767"
+fi
+
+hdr "Shims"
+if [[ -d "$SHIM_DIR" ]] && compgen -G "${SHIM_DIR}/*" >/dev/null; then
+    for f in "$SHIM_DIR"/*; do
+        n="$(basename "$f")"
+        real="$(sed -n 's/^REAL=//p' "$f" | head -1 | tr -d "'\"")"
+        guard="$(grep -o 'dev/tcp/127.0.0.1/[0-9]*' "$f" | head -1 | sed 's|.*/||')"
+        ok "${n} -> ${real:-<resolved at runtime>}${guard:+  (require_port ${guard})}"
+        # Does the intercepted name actually resolve to the shim?
+        resolved="$(command -v "$n" 2>/dev/null || true)"
+        if [[ "$resolved" != "${SHIM_DIR}/${n}" ]]; then
+            bad "  but '${n}' resolves to ${resolved:-nothing} -- the shim is NOT in effect here"
+        fi
+    done
+else
+    info "none configured"
+fi
+
+hdr "Services"
+if [[ -f "$OPTIONS" ]] && [[ "$(jq -r '(.services // []) | length' "$OPTIONS")" != "0" ]]; then
+    while IFS= read -r cmd; do
+        [[ -n "$cmd" ]] || continue
+        first="$(awk '{print $1}' <<<"$cmd")"
+        if pgrep -f -- "$cmd" >/dev/null 2>&1 || pgrep -x -- "$first" >/dev/null 2>&1; then
+            ok "running: ${cmd}"
+        else
+            bad "NOT running: ${cmd}"
+            info "  (a service that exits is restarted with backoff; check the add-on log for [svc:${first}])"
+        fi
+    done < <(jq -r '.services[]?' "$OPTIONS")
+else
+    info "none configured"
+fi
+
+hdr "Listening ports"
+found=0
+for p in 6767 3456 1455; do
+    if port_open "$p"; then ok "$p open"; found=1; fi
+done
+(( found )) || info "only the daemon port is expected unless you run services"
+
+if command -v teamclaude >/dev/null 2>&1; then
+    hdr "TeamClaude (this container -- NOT your desktop)"
+    info "config    ${XDG_CONFIG_HOME:-$HOME/.config}/teamclaude.json"
+    accounts="$(timeout 10 teamclaude accounts 2>&1 | head -3)"
+    if grep -qi "no accounts" <<<"$accounts"; then
+        bad "no accounts configured here -- run 'teamclaude login' in this terminal"
+        info "  accounts live per-machine; logging in on your desktop does not carry over"
+    else
+        ok "accounts present"
+        printf '%s\n' "$accounts" | sed 's/^/          /'
+    fi
+    port_open 3456 && ok "proxy listening on 3456" || bad "proxy NOT listening on 3456"
+fi
+
+hdr "Agents"
+for b in claude codex opencode gemini copilot; do
+    p="$(command -v "$b" 2>/dev/null || echo '-')"
+    info "$(printf '%-9s %s' "$b" "$p")"
+done
+printf '\n'
+info "Run 'agent-login' for authentication status."

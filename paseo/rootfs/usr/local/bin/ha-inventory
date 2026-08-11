@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+#
+# Live discovery of what exists on THIS Home Assistant instance.
+#
+# Agents should run this instead of guessing entity ids. Output is deliberately
+# compact -- a full state dump is tens of thousands of tokens and will bury the
+# thing you were actually looking for.
+#
+#   ha-inventory                     summary: version, domains, areas, add-ons
+#   ha-inventory domains             entity count per domain
+#   ha-inventory entities light      entity ids + names in one domain
+#   ha-inventory entities light on   ...filtered by state
+#   ha-inventory search kitchen      fuzzy match across entity id and name
+#   ha-inventory services            service count per domain
+#   ha-inventory services light      every service in one domain, with fields
+#   ha-inventory areas               areas and the entities in them
+#   ha-inventory state light.porch   full state and attributes for one entity
+
+set -euo pipefail
+
+api() { hass-api "$@"; }
+
+# Render a Jinja template through the Core API. The template API is the only
+# practical way to reach the area/device registry over REST.
+tpl() {
+    hass-api POST template "$(jq -n --arg t "$1" '{template: $t}')"
+}
+
+cmd_summary() {
+    local cfg states
+    cfg="$(api GET config)"
+    states="$(api GET states)"
+
+    printf '# Home Assistant\n\n'
+    printf 'Version:   %s\n' "$(jq -r .version <<<"$cfg")"
+    printf 'Name:      %s\n' "$(jq -r .location_name <<<"$cfg")"
+    printf 'Timezone:  %s\n' "$(jq -r .time_zone <<<"$cfg")"
+    printf 'Units:     %s\n' "$(jq -r .unit_system.temperature <<<"$cfg")"
+    printf 'Entities:  %s\n' "$(jq 'length' <<<"$states")"
+    printf 'Config:    /homeassistant\n'
+
+    printf '\n## Entities by domain\n\n'
+    jq -r '[.[].entity_id | split(".")[0]] | group_by(.) | map({d: .[0], n: length})
+           | sort_by(-.n)[] | "  \(.n | tostring | (" " * (5 - length)) + .)  \(.d)"' \
+        <<<"$states"
+
+    printf '\n## Areas\n\n'
+    tpl '{{ areas() | map("area_name") | list | join(", ") }}' 2>/dev/null \
+        | sed 's/^/  /' || printf '  (unavailable)\n'
+
+    printf '\n## Add-ons\n\n'
+    if ha addons list --raw-json >/dev/null 2>&1; then
+        ha addons list --raw-json \
+            | jq -r '.data.addons[] | "  \(.state | (. + " " * (8 - length)))  \(.slug)"' \
+            | sort
+    else
+        printf '  (Supervisor unavailable)\n'
+    fi
+
+    printf '\nRun `ha-inventory entities <domain>` to list a domain.\n'
+}
+
+cmd_domains() {
+    api GET states | jq -r '
+        [.[].entity_id | split(".")[0]] | group_by(.) | map({d: .[0], n: length})
+        | sort_by(-.n)[] | "\(.n)\t\(.d)"'
+}
+
+cmd_entities() {
+    local domain="${1:?usage: ha-inventory entities <domain> [state]}"
+    local want="${2:-}"
+    api GET states | jq -r --arg d "$domain" --arg s "$want" '
+        [.[] | select(.entity_id | startswith($d + "."))]
+        | if $s == "" then . else [.[] | select(.state == $s)] end
+        | .[] | "\(.entity_id)\t\(.state)\t\(.attributes.friendly_name // "")"'
+}
+
+cmd_search() {
+    local q="${1:?usage: ha-inventory search <text>}"
+    api GET states | jq -r --arg q "$q" '
+        .[] | select(
+            (.entity_id | ascii_downcase | contains($q | ascii_downcase)) or
+            ((.attributes.friendly_name // "") | ascii_downcase | contains($q | ascii_downcase))
+        ) | "\(.entity_id)\t\(.state)\t\(.attributes.friendly_name // "")"'
+}
+
+cmd_services() {
+    local domain="${1:-}"
+    if [[ -z "$domain" ]]; then
+        api GET services | jq -r '.[] | "\(.services | length)\t\(.domain)"' | sort -rn
+    else
+        api GET services | jq -r --arg d "$domain" '
+            .[] | select(.domain == $d) | .services | to_entries[]
+            | "\($d).\(.key)\n    \(.value.description // "")\n    fields: \(
+                  (.value.fields // {}) | keys | join(", ") | if . == "" then "none" else . end)"'
+    fi
+}
+
+cmd_areas() {
+    tpl '{% for a in areas() %}{{ area_name(a) }}: {{ area_entities(a) | join(", ") }}
+{% endfor %}'
+}
+
+cmd_state() {
+    local entity="${1:?usage: ha-inventory state <entity_id>}"
+    api GET "states/${entity}"
+}
+
+case "${1:-summary}" in
+    summary|"")  cmd_summary ;;
+    domains)     cmd_domains ;;
+    entities)    shift; cmd_entities "$@" ;;
+    search)      shift; cmd_search "$@" ;;
+    services)    shift; cmd_services "$@" ;;
+    areas)       cmd_areas ;;
+    state)       shift; cmd_state "$@" ;;
+    -h|--help|help)
+        sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *)
+        printf 'unknown subcommand: %s (try --help)\n' "$1" >&2; exit 2 ;;
+esac

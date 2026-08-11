@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+#
+# Home Assistant add-on entrypoint for Paseo.
+#
+# Runs as root. Translates /data/options.json into environment variables and
+# Paseo config, prepares the persistent directories, then hands off to the
+# upstream entrypoint which does its own first-run setup and drops to uid 1000.
+#
+# Nothing here starts the daemon itself -- upstream owns that.
+
+set -euo pipefail
+
+UPSTREAM_ENTRYPOINT=/usr/local/bin/paseo-docker-entrypoint
+PASEO_UID=1000
+PASEO_GID=1000
+CHOWN_MARKER=/data/.ha-paseo-chowned-v1
+
+log()   { printf '[ha-paseo] %s\n' "$*"; }
+warn()  { printf '[ha-paseo] WARNING: %s\n' "$*" >&2; }
+fatal() { printf '[ha-paseo] FATAL: %s\n' "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Options
+#
+# Supervisor writes /data/options.json. When it is absent (local `docker run`
+# testing) fall back to an empty object so every option takes its default and
+# plain -e environment variables still work.
+# ---------------------------------------------------------------------------
+OPTIONS_FILE=/data/options.json
+if [[ ! -f "$OPTIONS_FILE" ]]; then
+    OPTIONS_FILE=/tmp/ha-paseo-options.json
+    printf '{}\n' > "$OPTIONS_FILE"
+    log "no /data/options.json (not running under Supervisor); using defaults"
+fi
+
+opt_str()  { jq -r  --arg d "$2" "$1 // \$d"  "$OPTIONS_FILE"; }
+opt_json() { jq -c              "$1 // $2"    "$OPTIONS_FILE"; }
+
+password="$(opt_str '.password' '')"
+hostnames="$(jq -r '(.hostnames // []) | join(",")' "$OPTIONS_FILE")"
+log_level="$(opt_str '.log_level' 'info')"
+relay_enabled="$(opt_json '.relay_enabled' 'false')"
+workspace_root="$(opt_str '.workspace_root' '/share/paseo/workspace')"
+expose_ha_config="$(opt_json '.expose_ha_config' 'true')"
+ha_mcp_url="$(opt_str '.ha_mcp_url' 'http://supervisor/core/mcp_server/sse')"
+
+# Supervisor's option schema has no JSON type, so provider_overrides arrives as
+# a string. Accept either form, and fall back to {} on unparseable input rather
+# than letting a typo in the config tab stop the add-on from booting.
+provider_overrides="$(jq -c '
+    (.provider_overrides // {}) as $p
+    | if ($p | type) == "string"
+      then (($p | fromjson?) // {})
+      else $p end
+' "$OPTIONS_FILE")"
+if [[ "$provider_overrides" == "{}" ]] \
+   && [[ -n "$(opt_str '.provider_overrides' '')" ]] \
+   && [[ "$(opt_str '.provider_overrides' '')" != "{}" ]]; then
+    warn "provider_overrides is not valid JSON; ignoring it"
+fi
+extra_npm="$(jq -r '(.extra_npm_packages // []) | join(" ")' "$OPTIONS_FILE")"
+extra_apt="$(jq -r '(.extra_apt_packages // []) | join(" ")' "$OPTIONS_FILE")"
+
+# An explicit -e PASEO_PASSWORD wins, so the image can be exercised locally
+# without writing an options file.
+if [[ -n "${PASEO_PASSWORD:-}" ]]; then
+    password="$PASEO_PASSWORD"
+fi
+
+if [[ -z "$password" ]]; then
+    fatal "the 'password' option is empty.
+
+Port 6767 is published on your LAN and this add-on holds a Supervisor token
+with manager rights, so Paseo will not be started without authentication.
+Set a password in the add-on Configuration tab and restart."
+fi
+
+export PASEO_PASSWORD="$password"
+export PASEO_LOG_LEVEL="$log_level"
+if [[ -n "$hostnames" ]]; then
+    export PASEO_HOSTNAMES="$hostnames"
+fi
+
+# ---------------------------------------------------------------------------
+# Persistent directories
+# ---------------------------------------------------------------------------
+# Create a directory and hand it to the paseo user, including any intermediate
+# components mkdir -p had to create. Without the walk, `mkdir -p
+# /share/paseo/workspace` leaves /share/paseo owned by root and the daemon
+# cannot create siblings under it.
+#
+# /data and /share themselves are Supervisor mount points and are left alone.
+ensure_dir() {
+    local path="$1" current="" part parts
+    mkdir -p "$path"
+    IFS=/ read -ra parts <<< "${path#/}"
+    for part in "${parts[@]}"; do
+        current="${current}/${part}"
+        case "$current" in
+            /data|/share|/config|/homeassistant|/ssl) continue ;;
+        esac
+        if [[ -d "$current" ]] \
+           && [[ "$(stat -c '%u:%g' "$current")" != "${PASEO_UID}:${PASEO_GID}" ]]; then
+            chown "${PASEO_UID}:${PASEO_GID}" "$current"
+        fi
+    done
+}
+
+ensure_dir /data/home
+ensure_dir "$workspace_root"
+ensure_dir /share/paseo/bin
+
+# A restored backup or a hand-edited /share can leave files owned by the wrong
+# uid. Do the expensive recursive pass once, then never again -- worktrees get
+# large and this runs on every boot.
+if [[ ! -f "$CHOWN_MARKER" ]]; then
+    log "first run: normalising ownership of /data/home"
+    chown -R "${PASEO_UID}:${PASEO_GID}" /data/home || warn "recursive chown of /data/home failed"
+    touch "$CHOWN_MARKER"
+fi
+
+# ---------------------------------------------------------------------------
+# Optional extra packages
+#
+# Neither is fatal: a transient network failure at boot should not take the
+# add-on down, it should just log and carry on.
+# ---------------------------------------------------------------------------
+if [[ -n "$extra_apt" ]]; then
+    log "installing extra apt packages: $extra_apt"
+    if apt-get update -qq; then
+        # shellcheck disable=SC2086
+        apt-get install -y --no-install-recommends $extra_apt \
+            || warn "one or more extra_apt_packages failed to install"
+    else
+        warn "apt-get update failed; skipping extra_apt_packages"
+    fi
+    rm -rf /var/lib/apt/lists/*
+fi
+
+if [[ -n "$extra_npm" ]]; then
+    log "installing extra npm packages: $extra_npm"
+    # shellcheck disable=SC2086
+    gosu "${PASEO_UID}:${PASEO_GID}" npm install -g --no-fund --no-audit $extra_npm \
+        || warn "one or more extra_npm_packages failed to install"
+fi
+
+# ---------------------------------------------------------------------------
+# Paseo config
+#
+# Seeded as the paseo user so ownership is right, and merged rather than
+# overwritten so edits made from the app survive a restart.
+# ---------------------------------------------------------------------------
+SEED_RELAY="$relay_enabled" \
+SEED_WORKTREE_ROOT="$workspace_root" \
+SEED_PROVIDER_OVERRIDES="$provider_overrides" \
+gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-seed-config
+
+# ---------------------------------------------------------------------------
+# Home Assistant wiring for the agents
+# ---------------------------------------------------------------------------
+if [[ "$expose_ha_config" == "true" ]]; then
+    if [[ -d /homeassistant ]]; then
+        log "Home Assistant config is mapped at /homeassistant"
+        HA_MCP_URL="$ha_mcp_url" \
+        gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-postboot seed-ha-config \
+            || warn "failed to seed Home Assistant agent config"
+    else
+        warn "expose_ha_config is on but /homeassistant is not mapped"
+    fi
+fi
+
+# Register /homeassistant as a workspace once the daemon answers. This cannot
+# happen before the handoff -- `paseo workspace create` talks to a running
+# daemon -- so it runs in the background and polls the unauthenticated
+# /api/health route.
+if [[ "$expose_ha_config" == "true" && -d /homeassistant ]]; then
+    gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-postboot register-workspace &
+fi
+
+log "starting Paseo (state in ${PASEO_HOME}, workspaces in ${workspace_root})"
+
+# Hand off. Upstream performs its first-run volume setup as root and then drops
+# to uid 1000 via gosu; replacing that would mean reimplementing it.
+exec "$UPSTREAM_ENTRYPOINT" "$@"

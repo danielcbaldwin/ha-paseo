@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 220" width="640" height="220">
+  <!-- Source asset for logo.png. Regenerate with scripts/gen-images.sh -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="640" height="220" fill="none"/>
+
+  <g transform="translate(24, 26) scale(0.328)">
+    <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+    <path d="M 136 392 C 136 300, 240 300, 240 232 C 240 164, 340 164, 376 132"
+          fill="none" stroke="#ffffff" stroke-width="34"
+          stroke-linecap="round" stroke-opacity="0.95"/>
+    <circle cx="136" cy="392" r="30" fill="#ffffff"/>
+    <circle cx="240" cy="232" r="22" fill="#ffffff" fill-opacity="0.75"/>
+    <circle cx="376" cy="132" r="38" fill="#ffffff"/>
+  </g>
+
+  <text x="216" y="104" font-family="DejaVu Sans, Helvetica, Arial, sans-serif"
+        font-size="72" font-weight="700" fill="#1f2937">Paseo</text>
+  <text x="218" y="150" font-family="DejaVu Sans, Helvetica, Arial, sans-serif"
+        font-size="27" font-weight="400" fill="#6b7280">Home Assistant add-on</text>
+</svg>

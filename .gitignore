@@ -1,0 +1,6 @@
+# Local Supervisor simulation used by scripts/dev-run.sh
+.test/
+
+# Editor / OS noise
+.DS_Store
+*.swp

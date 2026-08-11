@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+#
+# Home Assistant integration steps that run as the paseo user.
+#
+#   seed-ha-config     teach every provider about this HA instance (before start)
+#   register-workspace register /homeassistant as a Paseo workspace (after start)
+#
+# Both are best-effort: a failure here must never stop the daemon.
+
+set -euo pipefail
+
+log()  { printf '[ha-paseo] %s\n' "$*"; }
+warn() { printf '[ha-paseo] WARNING: %s\n' "$*" >&2; }
+
+HA_DIR=/homeassistant
+SHARE=/usr/share/ha-paseo
+GUIDE="${SHARE}/home-assistant.md"
+HEALTH_URL="http://127.0.0.1:6767/api/health"
+
+# Managed files are rewritten on every boot so add-on updates actually reach the
+# agents. User-facing files in /homeassistant are only created if missing, so
+# hand edits are never clobbered.
+install_managed() { # install_managed <src> <dest>
+    mkdir -p "$(dirname "$2")"
+    cp -f "$1" "$2"
+}
+
+create_if_absent() { # create_if_absent <src> <dest>
+    if [[ -f "$2" ]]; then
+        return 0
+    fi
+    mkdir -p "$(dirname "$2")"
+    cp -f "$1" "$2"
+    log "wrote $2"
+}
+
+# ---------------------------------------------------------------------------
+seed_ha_config() {
+    local mcp_url="${HA_MCP_URL:-http://supervisor/core/mcp_server/sse}"
+
+    # --- Claude Code -------------------------------------------------------
+    # A skill is the right mechanism here: it is discovered automatically and
+    # only pulled into context when the task is actually about Home Assistant.
+    install_managed "${SHARE}/skill/SKILL.md" \
+        "${CLAUDE_CONFIG_DIR}/skills/home-assistant/SKILL.md"
+
+    for f in "${SHARE}"/commands/*.md; do
+        install_managed "$f" "${CLAUDE_CONFIG_DIR}/commands/$(basename "$f")"
+    done
+
+    # Claude Code expands ${VAR} in .mcp.json at load time, so the Supervisor
+    # token is referenced rather than written to disk. That matters: this file
+    # lives in the Home Assistant config directory, which ends up in backups.
+    # The token also rotates on every add-on start, so a literal would go stale.
+    if [[ ! -f "${HA_DIR}/.mcp.json" ]]; then
+        cat > "${HA_DIR}/.mcp.json" <<EOF
+{
+  "mcpServers": {
+    "homeassistant": {
+      "type": "sse",
+      "url": "${mcp_url}",
+      "headers": {
+        "Authorization": "Bearer \${SUPERVISOR_TOKEN}"
+      }
+    }
+  }
+}
+EOF
+        log "wrote ${HA_DIR}/.mcp.json"
+    fi
+
+    # --- OpenCode ----------------------------------------------------------
+    # Global instructions, so OpenCode knows about Home Assistant from any
+    # workspace, not just /homeassistant. Merged into whatever is already there.
+    local oc_dir="${XDG_CONFIG_HOME}/opencode"
+    local oc_cfg="${oc_dir}/opencode.json"
+    mkdir -p "${oc_dir}/command"
+
+    for f in "${SHARE}"/commands/*.md; do
+        install_managed "$f" "${oc_dir}/command/$(basename "$f")"
+    done
+
+    [[ -f "$oc_cfg" ]] || printf '{}\n' > "$oc_cfg"
+    if jq -e . "$oc_cfg" >/dev/null 2>&1; then
+        local tmp
+        tmp="$(mktemp "${oc_dir}/.opencode.json.XXXXXX")"
+        jq --arg guide "$GUIDE" --arg url "$mcp_url" '
+            .["$schema"] = "https://opencode.ai/config.json"
+            | .instructions = (((.instructions // []) + [$guide]) | unique)
+            | .mcp = (.mcp // {})
+            | .mcp.homeassistant = {
+                type: "remote",
+                url: $url,
+                enabled: true,
+                headers: { "Authorization": "Bearer {env:SUPERVISOR_TOKEN}" }
+              }
+        ' "$oc_cfg" > "$tmp" && mv "$tmp" "$oc_cfg"
+        log "updated ${oc_cfg}"
+    else
+        warn "${oc_cfg} is not valid JSON; leaving it alone"
+    fi
+
+    # --- Codex -------------------------------------------------------------
+    # Codex reads $CODEX_HOME/AGENTS.md as global guidance.
+    install_managed "$GUIDE" "${CODEX_HOME}/AGENTS.md"
+
+    # Codex keeps MCP servers in config.toml. Merging TOML we do not own risks
+    # destroying user settings, so write the snippet and let the user paste it.
+    mkdir -p "${HOME}/.ha-paseo"
+    cat > "${HOME}/.ha-paseo/mcp-snippets.md" <<EOF
+# Home Assistant MCP
+
+Claude Code (\`${HA_DIR}/.mcp.json\`) and OpenCode (\`${oc_cfg}\`) are wired up
+automatically. Codex keeps MCP servers in TOML, which this add-on will not
+rewrite on your behalf -- paste this into \`${CODEX_HOME}/config.toml\`:
+
+\`\`\`toml
+[mcp_servers.homeassistant]
+url = "${mcp_url}"
+http_headers = { Authorization = "Bearer \${SUPERVISOR_TOKEN}" }
+\`\`\`
+
+Every provider can also just call \`hass-api\` and \`ha-inventory\`, which need
+no MCP setup at all.
+EOF
+
+    # --- Project-level instructions ----------------------------------------
+    # CLAUDE.md for Claude Code, AGENTS.md for Codex and OpenCode.
+    create_if_absent "$GUIDE" "${HA_DIR}/CLAUDE.md"
+    create_if_absent "$GUIDE" "${HA_DIR}/AGENTS.md"
+
+    log "agent instructions installed for claude, codex and opencode"
+}
+
+# ---------------------------------------------------------------------------
+register_workspace() {
+    local waited=0
+    while ! curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; do
+        sleep 2
+        waited=$((waited + 2))
+        if (( waited >= 120 )); then
+            warn "daemon did not become healthy within 120s; skipping workspace registration"
+            return 0
+        fi
+    done
+
+    if paseo workspace ls --json 2>/dev/null | jq -e \
+        --arg p "$HA_DIR" 'any(.[]?; .path == $p)' >/dev/null 2>&1; then
+        log "workspace for ${HA_DIR} already registered"
+        return 0
+    fi
+
+    if paseo workspace create \
+        --isolation local \
+        --path "$HA_DIR" \
+        --title "Home Assistant" >/dev/null 2>&1; then
+        log "registered ${HA_DIR} as a Paseo workspace"
+    else
+        warn "could not register ${HA_DIR} as a workspace; add it from the app"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+case "${1:-}" in
+    seed-ha-config)     seed_ha_config ;;
+    register-workspace) register_workspace ;;
+    *) printf 'usage: %s {seed-ha-config|register-workspace}\n' "${0##*/}" >&2; exit 2 ;;
+esac

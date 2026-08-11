@@ -1,0 +1,18 @@
+---
+# Pinned by digest so an upstream `latest` retag never silently changes what
+# this add-on ships. Both architectures resolve from the same multi-arch index;
+# Docker selects the right platform at build time.
+#
+# To bump: check the new tag exists for both platforms, then update the digest
+# here and the version in config.yaml. See DOCS.md, "Updating Paseo".
+build_from:
+  amd64: ghcr.io/getpaseo/paseo@sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
+  aarch64: ghcr.io/getpaseo/paseo@sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
+
+args:
+  HA_CLI_VERSION: "5.3.0"
+  GH_CLI_VERSION: "2.97.0"
+
+labels:
+  org.opencontainers.image.source: https://github.com/danielcbaldwin/ha-paseo
+  org.opencontainers.image.licenses: MIT

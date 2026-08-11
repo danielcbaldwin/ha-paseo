@@ -1,0 +1,88 @@
+---
+name: Paseo
+version: "0.3.1-1"
+slug: paseo
+description: >-
+  Self-hosted orchestration for Claude Code, Codex, OpenCode and Copilot,
+  with read/write access to your Home Assistant configuration.
+url: https://github.com/danielcbaldwin/ha-paseo
+image: ghcr.io/danielcbaldwin/ha-paseo-{arch}
+
+# Upstream Paseo publishes linux/amd64 and linux/arm64 only. There is no
+# 32-bit ARM build, so armv7 hosts cannot run this add-on.
+arch:
+  - amd64
+  - aarch64
+
+# The upstream image supplies tini as PID 1; no s6-overlay here.
+init: false
+startup: services
+boot: auto
+hostname: paseo
+
+ports:
+  6767/tcp: 6767
+ports_description:
+  6767/tcp: >-
+    Paseo daemon. Serves the API, the WebSocket and the web UI on one origin.
+webui: "http://[HOST]:[PORT:6767]/"
+
+# Deliberately no `ingress:`.
+#
+# Ingress serves an add-on under /api/hassio_ingress/<token>/, and Paseo has no
+# base-path support -- its assets and WebSocket are absolute-rooted, so they
+# would 404 behind the ingress prefix. Connect the Paseo app straight to
+# <host>:6767 over Tailscale, a VPN, or the Paseo relay instead.
+
+map:
+  - type: homeassistant_config   # -> /homeassistant
+    read_only: false
+  - type: share                  # -> /share  (workspaces and PATH extras)
+    read_only: false
+  - type: addon_config
+    read_only: false
+  - type: ssl
+    read_only: true
+
+# hassio_role: manager injects SUPERVISOR_TOKEN and lets the bundled `ha` CLI
+# manage add-ons and backups. Combined with homeassistant_config:rw this gives
+# the agents very broad control -- see the security section of DOCS.md.
+hassio_api: true
+hassio_role: manager
+homeassistant_api: true
+auth_api: true
+
+# Paseo spawns many subprocesses, git worktrees and optional browser tooling.
+# The default Supervisor profile is a likely source of opaque failures, so
+# start unconfined. Tracked as follow-up work in DOCS.md.
+apparmor: false
+
+options:
+  password: ""
+  hostnames:
+    - homeassistant.local
+    - .lan
+    - .ts.net
+  log_level: info
+  relay_enabled: false
+  workspace_root: /share/paseo/workspace
+  expose_ha_config: true
+  ha_mcp_url: http://supervisor/core/mcp_server/sse
+  provider_overrides: "{}"
+  extra_npm_packages: []
+  extra_apt_packages: []
+
+schema:
+  password: password
+  hostnames:
+    - str
+  log_level: list(trace|debug|info|warn|error)
+  relay_enabled: bool
+  workspace_root: str
+  expose_ha_config: bool
+  ha_mcp_url: str
+  provider_overrides: str
+  extra_npm_packages:
+    - str
+  extra_apt_packages:
+    - str

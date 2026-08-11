@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# Thin authenticated wrapper over the Home Assistant Core REST API.
+#
+# Add-ons reach Core through the Supervisor proxy at http://supervisor/core/api
+# using SUPERVISOR_TOKEN, so no long-lived access token is needed. Gives every
+# agent a working path to Home Assistant without any MCP setup.
+#
+#   hass-api GET  states
+#   hass-api GET  states/light.kitchen
+#   hass-api POST services/light/turn_on '{"entity_id":"light.kitchen"}'
+#   hass-api POST template '{"template":"{{ states(\"sun.sun\") }}"}'
+
+set -euo pipefail
+
+BASE="${HASS_API_BASE:-http://supervisor/core/api}"
+
+if [[ -z "${SUPERVISOR_TOKEN:-}" ]]; then
+    echo "hass-api: SUPERVISOR_TOKEN is not set -- is homeassistant_api enabled?" >&2
+    exit 1
+fi
+
+if (( $# < 2 )); then
+    cat >&2 <<'EOF'
+usage: hass-api <METHOD> <path> [json-body]
+
+  hass-api GET  states
+  hass-api GET  states/light.kitchen
+  hass-api POST services/light/turn_on '{"entity_id":"light.kitchen"}'
+EOF
+    exit 2
+fi
+
+method="$1"
+path="${2#/}"
+body="${3:-}"
+
+args=(
+    --fail-with-body
+    --silent
+    --show-error
+    --request "${method^^}"
+    --header "Authorization: Bearer ${SUPERVISOR_TOKEN}"
+    --header "Content-Type: application/json"
+)
+if [[ -n "$body" ]]; then
+    args+=(--data "$body")
+fi
+
+# Pretty-print when the response is JSON, pass it through untouched otherwise
+# (the /api/ root and some error pages return plain text).
+response="$(curl "${args[@]}" "${BASE}/${path}")"
+if jq -e . >/dev/null 2>&1 <<<"$response"; then
+    jq . <<<"$response"
+else
+    printf '%s\n' "$response"
+fi

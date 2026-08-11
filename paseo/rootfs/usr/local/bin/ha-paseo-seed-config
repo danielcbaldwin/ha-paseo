@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#
+# Idempotent seed of $PASEO_HOME/config.json.
+#
+# Runs as the paseo user. Merges rather than overwrites: only the keys this
+# add-on owns are touched, so anything set from the Paseo app or by hand
+# survives a restart.
+#
+# The published schema marks every object additionalProperties:false, so this
+# writes known keys only:
+#   https://paseo.sh/schemas/paseo.config.v1.json
+#
+# Deliberately NOT set here:
+#   daemon.listen        -- PASEO_LISTEN=0.0.0.0:6767 is already in the image
+#   daemon.auth.password -- the schema accepts a bcrypt hash only; the daemon
+#                           hashes the plaintext PASEO_PASSWORD on startup
+#   daemon.hostnames     -- passed through as PASEO_HOSTNAMES
+
+set -euo pipefail
+
+CONFIG="${PASEO_HOME}/config.json"
+RELAY="${SEED_RELAY:-false}"
+WORKTREE_ROOT="${SEED_WORKTREE_ROOT:-/share/paseo/workspace}"
+PROVIDER_OVERRIDES="${SEED_PROVIDER_OVERRIDES:-}"
+[[ -n "$PROVIDER_OVERRIDES" ]] || PROVIDER_OVERRIDES='{}'
+
+mkdir -p "$PASEO_HOME"
+[[ -f "$CONFIG" ]] || printf '{"version":1}\n' > "$CONFIG"
+
+# A corrupt config would otherwise be silently replaced; back it up instead.
+if ! jq -e . "$CONFIG" >/dev/null 2>&1; then
+    printf '[ha-paseo] WARNING: %s is not valid JSON; backing it up and starting fresh\n' \
+        "$CONFIG" >&2
+    mv "$CONFIG" "${CONFIG}.corrupt"
+    printf '{"version":1}\n' > "$CONFIG"
+fi
+
+tmp="$(mktemp "${PASEO_HOME}/.config.json.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+
+jq \
+    --argjson relay "$RELAY" \
+    --arg     wt "$WORKTREE_ROOT" \
+    --argjson providers "$PROVIDER_OVERRIDES" \
+    '
+    .version = 1
+    | .["$schema"] = "https://paseo.sh/schemas/paseo.config.v1.json"
+
+    | .daemon = (.daemon // {})
+    | .daemon.relay = ((.daemon.relay // {}) + {enabled: $relay})
+
+    # The hosted web client needs an explicit CORS entry to reach this daemon.
+    | .daemon.cors = (.daemon.cors // {})
+    | .daemon.cors.allowedOrigins =
+        (((.daemon.cors.allowedOrigins // []) + ["https://app.paseo.sh"]) | unique)
+
+    | .worktrees = ((.worktrees // {}) + {root: $wt})
+
+    # Recursive merge, so an override can add env/label to a provider without
+    # discarding the rest of its definition.
+    | if ($providers | length) > 0 then
+          .agents = (.agents // {})
+        | .agents.providers = ((.agents.providers // {}) * $providers)
+      else . end
+    ' "$CONFIG" > "$tmp"
+
+mv "$tmp" "$CONFIG"
+trap - EXIT
+
+printf '[ha-paseo] seeded %s\n' "$CONFIG"

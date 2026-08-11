@@ -20,6 +20,11 @@ set -euo pipefail
 
 CONFIG="${PASEO_HOME}/config.json"
 RELAY="${SEED_RELAY:-false}"
+RELAY_ENDPOINT="${SEED_RELAY_ENDPOINT:-}"
+RELAY_PUBLIC_ENDPOINT="${SEED_RELAY_PUBLIC_ENDPOINT:-}"
+RELAY_USE_TLS="${SEED_RELAY_USE_TLS:-true}"
+RELAY_PUBLIC_USE_TLS="${SEED_RELAY_PUBLIC_USE_TLS:-true}"
+APP_BASE_URL="${SEED_APP_BASE_URL:-}"
 WORKTREE_ROOT="${SEED_WORKTREE_ROOT:-/share/paseo/workspace}"
 PROVIDER_OVERRIDES="${SEED_PROVIDER_OVERRIDES:-}"
 [[ -n "$PROVIDER_OVERRIDES" ]] || PROVIDER_OVERRIDES='{}'
@@ -40,6 +45,11 @@ trap 'rm -f "$tmp"' EXIT
 
 jq \
     --argjson relay "$RELAY" \
+    --arg     relay_endpoint "$RELAY_ENDPOINT" \
+    --arg     relay_public_endpoint "$RELAY_PUBLIC_ENDPOINT" \
+    --argjson relay_use_tls "$RELAY_USE_TLS" \
+    --argjson relay_public_use_tls "$RELAY_PUBLIC_USE_TLS" \
+    --arg     app_base_url "$APP_BASE_URL" \
     --arg     wt "$WORKTREE_ROOT" \
     --argjson providers "$PROVIDER_OVERRIDES" \
     '
@@ -48,6 +58,26 @@ jq \
 
     | .daemon = (.daemon // {})
     | .daemon.relay = ((.daemon.relay // {}) + {enabled: $relay})
+
+    # A custom relay endpoint. When empty the keys are REMOVED rather than left
+    # behind, so switching connection_mode back to the hosted relay does not
+    # silently keep pointing at the old self-hosted one.
+    | .daemon.relay =
+        (if $relay_endpoint == "" then
+             (.daemon.relay | del(.endpoint, .useTls))
+         else
+             .daemon.relay + {endpoint: $relay_endpoint, useTls: $relay_use_tls}
+         end)
+    | .daemon.relay =
+        (if $relay_public_endpoint == "" then
+             (.daemon.relay | del(.publicEndpoint, .publicUseTls))
+         else
+             .daemon.relay
+             + {publicEndpoint: $relay_public_endpoint, publicUseTls: $relay_public_use_tls}
+         end)
+
+    | if $app_base_url == "" then .
+      else .app = ((.app // {}) + {baseUrl: $app_base_url}) end
 
     # The hosted web client needs an explicit CORS entry to reach this daemon.
     | .daemon.cors = (.daemon.cors // {})

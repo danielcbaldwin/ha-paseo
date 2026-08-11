@@ -152,9 +152,10 @@ print_pairing() {
     # and a background job must never sit on a prompt -- nor silently turn on a
     # hosted relay nobody asked for.
     if [[ "${RELAY_ENABLED:-false}" != "true" ]]; then
-        log "relay is off -- connect directly to <host>:6767 with your password."
-        log "  To use the relay instead: set relay_enabled, restart, and the join"
-        log "  link will be printed here. Or run 'paseo daemon pair' in a terminal."
+        log "connection_mode is '${CONNECTION_MODE:-local}' -- no relay, so there is"
+        log "  no join link. Connect directly: host = this machine's IP, port 6767,"
+        log "  SSL off, plus your password."
+        log "  For a join link, set connection_mode to 'relay' (or 'custom_relay')."
         return 0
     fi
 

@@ -6,8 +6,7 @@ wired into your Home Assistant configuration.
 
 Think of it as the [claude-code-ha](https://github.com/ESJavadex/claude-code-ha)
 idea with Paseo as the surface instead of a single terminal: multiple agents,
-real workspaces and git worktrees, and a phone client that can reach it all from
-anywhere on your tailnet.
+real workspaces and git worktrees, and desktop, web and phone clients.
 
 ## Install
 
@@ -24,26 +23,33 @@ Or by hand:
 
 ### 2. Configure it
 
-Install **Paseo**, then open the **Configuration** tab. Only one field is
-mandatory:
+Install **Paseo** and press **Start**. Every option has a working default, so
+there is nothing you must fill in first.
 
-| Field | Set it to |
-| --- | --- |
-| `password` | Anything you like. The add-on **refuses to start without one** — port 6767 is published on your LAN and the daemon holds a Supervisor token. |
-| `hostnames` | Add any DNS name you'll use. Defaults cover `*.lan`, `*.ts.net` and `homeassistant.local`. IPs always work. |
+Watch the **Log** tab. If you left `password` blank, one is generated for you
+and printed there in a banner — copy it, you'll need it to connect:
 
-Everything else has a working default. Save, then **Start**, and watch the
-**Log** tab for `starting Paseo`.
+```
+============== Generated Paseo password ==============
+  Df1pd0sMOIIB06Zi47xsa8Bh4Ekn
+======================================================
+```
+
+It's saved to `/data/.paseo-generated-password` and reused on every restart. Set
+the `password` option yourself if you'd rather choose one. Add any DNS name you
+plan to use to `hostnames` (IPs always work without it).
 
 ### 3. Connect a client
 
 There's no sidebar panel — [see why](#two-things-worth-knowing-up-front). Pick one:
 
-- **Paseo app over Tailscale/LAN** (recommended) — Settings → Add host →
+- **Paseo app, direct connection** (recommended) — Settings → Add host →
   Direct connection. Host = your HA box's IP, Port = `6767`, **SSL off**,
-  password as configured. No pairing link needed.
-- **Relay** — set `relay_enabled: true`, restart, and the join URL is printed
-  in the add-on **Log**.
+  password as configured. No pairing link needed. Works on your LAN, or from
+  anywhere if you already have a VPN to it.
+- **Relay** (the default) — the join URL is printed in the add-on **Log** on
+  start. Works without any network changes. Set `connection_mode: local` to
+  turn it off, or `custom_relay` to point at a relay you run yourself.
 - **Browser** — the **Open Web UI** button on the add-on page.
 
 ### 4. Log in to the agents
@@ -122,8 +128,8 @@ Shared slash commands: `/ha-inventory`, `/ha-check`, `/ha-logs`,
 
 **There is no sidebar panel.** Paseo cannot be served under a URL subpath, and
 Ingress serves add-ons under `/api/hassio_ingress/<token>/`, so its assets and
-WebSocket would break. Connect the Paseo app directly to `<host>:6767` over
-Tailscale, a VPN, or Paseo's relay. The **Open Web UI** button works too.
+WebSocket would break. Connect the Paseo app directly to `<host>:6767` on your
+LAN, over a VPN, or via Paseo's relay. The **Open Web UI** button works too.
 
 **This gives a language model broad control of your smart home** — read/write on
 your configuration plus a Supervisor token with `manager` role. That is the

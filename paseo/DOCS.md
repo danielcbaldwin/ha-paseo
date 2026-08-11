@@ -22,25 +22,73 @@ configuration.
 ## Setup
 
 1. Install the add-on and open **Configuration**.
-2. Set a **password**. The add-on refuses to start without one — port 6767 is
-   published on your LAN and the daemon holds a Supervisor token.
+2. Optionally set a **password**. Leave it blank and one is generated for you
+   on first start and printed to the add-on log — you never have to invent one.
+   See "Authentication" below.
 3. Add any hostname you will reach it by to **hostnames** (Paseo returns
    `403 Host not allowed` for names that are not on the list). IP addresses and
-   `localhost` always work without an entry. The defaults cover `*.lan`,
-   `*.ts.net` and `homeassistant.local`.
+   `localhost` always work without an entry. The defaults cover `*.lan` and
+   `homeassistant.local`.
 4. Start the add-on and watch the log for `starting Paseo`.
 
 ### Connecting a client
 
-There is **no sidebar panel**, by design — see "Why no Ingress" below. Use one
-of these instead:
+There is **no sidebar panel**, by design — see "Why no Ingress" below.
 
-| Route | How |
-| --- | --- |
-| **Tailscale** (recommended) | In the Paseo app: Settings → Add host → Direct connection. Host = the HA box's Tailscale IP, Port = `6767`, SSL **off**, password as configured. **No join URL needed.** |
-| **LAN** | Same, using the HA box's LAN IP. |
-| **Relay** | Set `relay_enabled: true` and restart — the join link is printed to the add-on log. |
-| **Browser** | The **Open Web UI** button on the add-on page. |
+How clients reach the daemon is controlled by **`connection_mode`**:
+
+| `connection_mode` | What it does | When to use it |
+| --- | --- | --- |
+| **`relay`** *(default)* | Paseo's hosted relay. No router or network changes; a join link is printed to the add-on log. Traffic is end-to-end encrypted between your client and the daemon. | You want it to just work, including from outside your network. |
+| **`local`** | No relay at all. Direct connections only. | The daemon is reachable already — same LAN, or you have a VPN to it — and you would rather nothing transited a third party. |
+| **`custom_relay`** | A relay you run yourself. The image already contains `@getpaseo/relay`. | You want off-network access without depending on Paseo's hosted service. |
+
+Whatever the mode, a **direct connection always works** when you can reach the
+box: in the Paseo app, Settings → Add host → Direct connection, host = the HA
+box's IP, port `6767`, SSL **off**, plus your password. No join link involved.
+The **Open Web UI** button on the add-on page works too.
+
+#### Running your own relay
+
+Point the add-on at it:
+
+```yaml
+connection_mode: custom_relay
+relay_endpoint: relay.example.com:443    # where the daemon connects
+relay_use_tls: true
+relay_public_endpoint: ""                # optional: what clients are told to use,
+relay_public_use_tls: true               #   if it differs from the above
+```
+
+`relay_endpoint` is required in this mode. If you leave it empty the add-on falls
+back to **`local`** and says so in the log — it will not quietly send your
+traffic to the hosted relay you just opted out of.
+
+Switching back to `relay` or `local` later removes the endpoint keys from the
+config, so a stale self-hosted address cannot linger.
+
+If you also self-host the Paseo web app, set `app_base_url` to its origin
+(default `https://app.paseo.sh`); it is what pairing links point at.
+
+### Authentication
+
+The daemon requires a password. You do not have to choose one:
+
+- **Leave `password` blank** — a 28-character random password is generated on
+  first start, printed to the add-on log in a banner, and saved to
+  `/data/.paseo-generated-password` (mode 600). It is reused on every restart,
+  so saved clients keep working. Lost it? Read it from the log or that file.
+- **Set `password`** — yours wins, and the generated one is ignored.
+
+There is no unauthenticated mode. A typical desktop Paseo install binds
+`127.0.0.1` and is unreachable from the network, which is why you may never have
+set a password there. This add-on is not that: it publishes 6767 on your LAN,
+and the daemon holds a Supervisor token with `manager` rights — anyone who
+reached the port could rewrite your automations or remove add-ons. Generating a
+password keeps setup effortless without that trade.
+
+The password is hashed in memory at startup and is **not** written into
+`config.json`, so changing it is just an edit and a restart.
 
 ### Getting the join / pairing URL
 
@@ -50,7 +98,7 @@ just enter host, port `6767` and the password — there is nothing to pair.
 Getting a shell inside a Home Assistant add-on is awkward, so the link is put
 where you can actually read it:
 
-1. Set `relay_enabled: true` in the add-on Configuration tab.
+1. Make sure `connection_mode` is `relay` (the default) or `custom_relay`.
 2. Restart the add-on.
 3. **Settings → Add-ons → Paseo → Log.** The join URL is printed in a banner:
 
@@ -73,8 +121,8 @@ paseo daemon pair --json   # just the data
 
 The add-on will not enable the relay for you. `paseo daemon pair` offers to turn
 it on interactively, and a background job silently enabling a hosted relay is
-not something that should happen behind your back — so when `relay_enabled` is
-off, the log tells you how to connect directly instead.
+not something that should happen behind your back — so in `local` mode the log
+tells you how to connect directly instead.
 
 ### Logging the agents in
 
@@ -145,17 +193,21 @@ works, prefer it — it keeps a key off disk entirely.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `password` | *(empty)* | **Required.** Masked in the UI. Hashed by the daemon at startup. |
-| `hostnames` | `homeassistant.local`, `.lan`, `.ts.net` | DNS names allowed to reach the daemon. |
+| `password` | *(empty)* | Leave blank to have one generated on first start and printed to the log. Masked in the UI. Hashed by the daemon at startup. |
+| `hostnames` | `homeassistant.local`, `.lan` | DNS names allowed to reach the daemon. Add any other name you use; IPs always work. |
 | `log_level` | `info` | `trace`, `debug`, `info`, `warn`, `error`. |
-| `relay_enabled` | `false` | Paseo's hosted end-to-end encrypted relay. Off by default. |
+| `connection_mode` | `relay` | `relay`, `local`, or `custom_relay`. See above. |
+| `relay_endpoint` | `""` | Required for `custom_relay` — where the daemon connects. |
+| `relay_public_endpoint` | `""` | Optional — what clients are told to connect to, if different. |
+| `relay_use_tls` / `relay_public_use_tls` | `true` | TLS for the two endpoints above. |
+| `app_base_url` | `https://app.paseo.sh` | Web app origin used in pairing links. Change if you self-host it. |
 | `workspace_root` | `/share/paseo/workspace` | Where worktrees are created. Kept on `/share` so clones stay out of add-on backups. |
 | `expose_ha_config` | `true` | Register `/homeassistant` as a workspace and write agent config into it. |
 | `ha_mcp_url` | `http://supervisor/core/mcp_server/sse` | Requires the **MCP Server** integration in Home Assistant. |
 | `provider_overrides` | `"{}"` | JSON string merged into `agents.providers`. See below. |
 | `provider_env` | `"{}"` | JSON string of env vars exported to the daemon and its agents — API keys for providers whose login flow will not work headless. Masked in the UI, plaintext on disk. |
 | `auto_update_agents` | `false` | Update every agent CLI to latest on each boot. Slow, network-dependent, not reproducible. |
-| `print_pairing_link` | `true` | Print the relay join URL to the add-on log at startup (only when `relay_enabled`). |
+| `print_pairing_link` | `true` | Print the relay join URL to the add-on log at startup. No effect in `local` mode. |
 | `extra_npm_packages` | `[]` | Installed into the persistent `/data/home/.npm-global` at each boot. |
 | `extra_apt_packages` | `[]` | Installed at each boot. Not persistent — apt state is in the image layer. |
 
@@ -317,7 +369,8 @@ What is on you:
 
 - Try it on a non-critical instance first.
 - Take a backup before letting an agent loose on your config.
-- Do not expose port 6767 to the internet. Use Tailscale or the relay.
+- Do not expose port 6767 to the internet. Keep it on your LAN, reach it over a
+  VPN, or use the relay.
 
 ### AppArmor
 
@@ -398,7 +451,7 @@ enforced by the build. To move to a new Paseo release:
 
 | Symptom | Cause |
 | --- | --- |
-| Add-on exits immediately, log says `the 'password' option is empty` | Set a password in Configuration. |
+| Clients are rejected and you never set a password | One was generated. Find it in the add-on **Log**, or in `/data/.paseo-generated-password`. |
 | `403 Host not allowed` | Add the DNS name you are using to `hostnames`. |
 | Web UI loads but will not connect | The static UI is served without auth; the API is not. Add a direct connection with the password. |
 | A provider is missing from the app | Its CLI is not installed or not on `PATH`. Check `extra_npm_packages`, or `/share/paseo/bin` for wrappers. |
@@ -407,6 +460,6 @@ enforced by the build. To move to a new Paseo release:
 | An add-on update did not change my Claude Code version | An `update-agents` override in `/data` is shadowing the image copy. Run `update-agents status`, then `update-agents reset`. |
 | A wrapper in `/share/paseo/bin` is not found in a terminal | Should not happen — `/etc/profile.d/ha-paseo-path.sh` restores `PATH` in login shells. Check the file survived, and that the script is executable. |
 | MCP server shows as failed | The **MCP Server** integration is not enabled in Home Assistant. `hass-api` works regardless. |
-| Agents cannot reach the internet or your tailnet | Add-on containers route through the HA host; check the host's own connectivity first. |
+| Agents cannot reach the internet or your other machines | Add-on containers route through the HA host; check the host's own connectivity first. |
 
 Daemon logs are in the add-on log and at `/data/home/.paseo/daemon.log`.

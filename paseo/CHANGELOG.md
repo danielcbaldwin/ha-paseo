@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.1-2
+
+- **The password is now optional.** Leave it blank and a 28-character one is
+  generated on first start, printed to the add-on log, and saved to
+  `/data/.paseo-generated-password` (mode 600) so it is reused across restarts.
+  Previously the add-on refused to start without one. There is still no
+  unauthenticated mode — 6767 is published on the LAN and the daemon holds a
+  Supervisor `manager` token.
+- **Fixed: boolean options set to `false` were silently ignored.** jq's `//`
+  treats `false` as absent, so `.x // true` returned `true` even when `x` was
+  explicitly `false`. This defeated `expose_ha_config: false` — opting out of
+  agent access to the Home Assistant config did nothing — plus
+  `print_pairing_link`, `relay_use_tls` and `relay_public_use_tls`.
+- **`connection_mode`** replaces `relay_enabled`, with three choices:
+  - `relay` *(new default)* — Paseo's hosted relay; the join link is printed to
+    the add-on log on start
+  - `local` — no relay, direct connections only
+  - `custom_relay` — a relay you run yourself, via `relay_endpoint`,
+    `relay_public_endpoint` and the matching TLS flags
+- `app_base_url` for pointing pairing links at a self-hosted Paseo web app
+- Switching away from `custom_relay` now *removes* the endpoint keys, so a stale
+  self-hosted address cannot linger in the config
+- An empty `relay_endpoint` under `custom_relay` falls back to `local` with a
+  warning rather than quietly using the hosted relay
+- Dropped `.ts.net` from the default `hostnames` and removed VPN-specific
+  assumptions from the docs
+- Full install walkthrough in the README
+
 ## 0.3.1-1
 
 Initial release. Packages Paseo 0.3.1 as a Home Assistant add-on.

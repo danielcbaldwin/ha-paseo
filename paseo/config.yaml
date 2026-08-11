@@ -1,6 +1,6 @@
 ---
 name: Paseo
-version: "0.3.1-1"
+version: "0.3.1-2"
 slug: paseo
 description: >-
   Self-hosted orchestration for Claude Code, Codex, OpenCode and Copilot,
@@ -30,7 +30,7 @@ webui: "http://[HOST]:[PORT:6767]/"
 # Ingress serves an add-on under /api/hassio_ingress/<token>/, and Paseo has no
 # base-path support -- its assets and WebSocket are absolute-rooted, so they
 # would 404 behind the ingress prefix. Connect the Paseo app straight to
-# <host>:6767 over Tailscale, a VPN, or the Paseo relay instead.
+# <host>:6767 on the LAN, over a VPN, or via the Paseo relay instead.
 
 map:
   - type: homeassistant_config   # -> /homeassistant
@@ -60,9 +60,13 @@ options:
   hostnames:
     - homeassistant.local
     - .lan
-    - .ts.net
   log_level: info
-  relay_enabled: false
+  connection_mode: relay
+  relay_endpoint: ""
+  relay_public_endpoint: ""
+  relay_use_tls: true
+  relay_public_use_tls: true
+  app_base_url: https://app.paseo.sh
   workspace_root: /share/paseo/workspace
   expose_ha_config: true
   ha_mcp_url: http://supervisor/core/mcp_server/sse
@@ -78,7 +82,12 @@ schema:
   hostnames:
     - str
   log_level: list(trace|debug|info|warn|error)
-  relay_enabled: bool
+  connection_mode: list(relay|local|custom_relay)
+  relay_endpoint: str?
+  relay_public_endpoint: str?
+  relay_use_tls: bool
+  relay_public_use_tls: bool
+  app_base_url: str?
   workspace_root: str
   expose_ha_config: bool
   ha_mcp_url: str

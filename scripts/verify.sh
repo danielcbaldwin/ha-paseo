@@ -23,7 +23,7 @@ ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; fail=$((fail + 1)); }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -f "${ENVDUMP:-}"; }
+cleanup() { docker rm -f "$NAME" "${NAME}-mode" >/dev/null 2>&1 || true; rm -f "${ENVDUMP:-}"; }
 trap cleanup EXIT
 
 check() {  # check <description> <command...>
@@ -73,9 +73,9 @@ mkdir -p "${TESTDIR}"/{data,share,homeassistant}
 cat > "${TESTDIR}/data/options.json" <<'EOF'
 {
   "password": "verify-secret",
-  "hostnames": ["homeassistant.local", ".lan", ".ts.net"],
+  "hostnames": ["homeassistant.local", ".lan"],
   "log_level": "info",
-  "relay_enabled": false,
+  "connection_mode": "local",
   "workspace_root": "/share/paseo/workspace",
   "expose_ha_config": true,
   "ha_mcp_url": "http://supervisor/core/mcp_server/sse",
@@ -113,7 +113,9 @@ check "/data/home owned by uid 1000" \
 step "3. Seeded config"
 cfg="$(in_container cat /data/home/.paseo/config.json)"
 check "worktrees.root set"        sh -c "jq -e '.worktrees.root == \"/share/paseo/workspace\"' <<<'$cfg'"
-check "relay disabled"            sh -c "jq -e '.daemon.relay.enabled == false' <<<'$cfg'"
+check "relay disabled in local mode" sh -c "jq -e '.daemon.relay.enabled == false' <<<'$cfg'"
+check "no stale relay endpoint"   sh -c "jq -e '.daemon.relay | has(\"endpoint\") | not' <<<'$cfg'"
+check "app.baseUrl seeded"        sh -c "jq -e '.app.baseUrl == \"https://app.paseo.sh\"' <<<'$cfg'"
 check "app.paseo.sh CORS origin"  sh -c "jq -e '.daemon.cors.allowedOrigins | index(\"https://app.paseo.sh\")' <<<'$cfg'"
 check "provider_overrides merged" sh -c "jq -e '.agents.providers.claude.label == \"Claude (verify)\"' <<<'$cfg'"
 
@@ -182,7 +184,61 @@ check "update-agents status runs" \
     sh -c "docker exec $NAME gosu paseo update-agents status | grep -q gemini"
 
 # ---------------------------------------------------------------------------
-step "7. Restart persistence"
+# Connection modes. Deliberately never exercises `relay`: that would register
+# this throwaway container with Paseo's hosted relay service. The custom
+# endpoint points at a dead local port so nothing leaves the container.
+step "7. Connection modes"
+
+boot_with_mode() {  # boot_with_mode <json-fragment>  -- password auto-added
+    boot_with_options "$(printf '{"password":"m",%s}' "$1")"
+}
+
+boot_with_options() {  # boot_with_options <full-json> ; echoes the seeded config
+    local opts="$1" dir="${TESTDIR}/mode"
+    docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
+    docker run --rm -v "${dir}:/wipe" alpine:3 sh -c 'rm -rf /wipe/* /wipe/.[!.]*' >/dev/null 2>&1 || true
+    rm -rf "$dir"; mkdir -p "$dir"/{data,share}
+    printf '%s\n' "$opts" > "${dir}/data/options.json"
+    # An unparseable options file would make the add-on exit before seeding any
+    # config, and every assertion below would then fail for the wrong reason.
+    jq -e . "${dir}/data/options.json" >/dev/null \
+        || { echo "BUG in boot_with_mode: invalid options.json" >&2; return 1; }
+    docker run -d --name "${NAME}-mode" \
+        -v "${dir}/data:/data" -v "${dir}/share:/share" "$IMAGE" >/dev/null
+    local waited=0
+    while [[ ! -f "${dir}/data/home/.paseo/config.json" ]] && (( waited < 40 )); do
+        sleep 2; waited=$((waited + 2))
+    done
+    cat "${dir}/data/home/.paseo/config.json" 2>/dev/null || echo '{}'
+}
+
+mcfg="$(boot_with_mode '"connection_mode":"custom_relay","relay_endpoint":"127.0.0.1:59999","relay_use_tls":false')"
+check "custom relay enabled"      sh -c "jq -e '.daemon.relay.enabled == true' <<<'$mcfg'"
+check "custom relay endpoint set" sh -c "jq -e '.daemon.relay.endpoint == \"127.0.0.1:59999\"' <<<'$mcfg'"
+check "custom relay useTls honoured" sh -c "jq -e '.daemon.relay.useTls == false' <<<'$mcfg'"
+
+mcfg="$(boot_with_mode '"connection_mode":"custom_relay"')"
+check "empty custom endpoint falls back to local" \
+    sh -c "jq -e '.daemon.relay.enabled == false' <<<'$mcfg'"
+check "fallback is warned about, not silent" \
+    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q \"falling back to 'local'\""
+check "fallback does not reach the hosted relay" \
+    sh -c "! jq -e '.daemon.relay | has(\"endpoint\")' <<<'$mcfg'"
+docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
+
+# jq's `//` treats false as absent, so every boolean defaulting to true used to
+# ignore being switched off. expose_ha_config was the dangerous one: opting out
+# of agent access to the HA config did nothing at all.
+step "7b. Booleans can actually be set to false"
+
+mcfg="$(boot_with_mode '"connection_mode":"local","expose_ha_config":false,"print_pairing_link":false')"
+check "expose_ha_config:false is honoured" \
+    sh -c "! docker logs ${NAME}-mode 2>&1 | grep -q 'Home Assistant config is mapped'"
+check "print_pairing_link:false is honoured" \
+    sh -c "! docker logs ${NAME}-mode 2>&1 | grep -q 'connection_mode is'"
+
+# ---------------------------------------------------------------------------
+step "8. Restart persistence"
 marker="persist-$$"
 in_container sh -c "mkdir -p /data/home/.claude && echo $marker > /data/home/.claude/verify-marker"
 docker rm -f "$NAME" >/dev/null
@@ -194,19 +250,41 @@ check "config.json survived restart" \
     in_container test -f /data/home/.paseo/config.json
 
 # ---------------------------------------------------------------------------
-step "8. Empty-password guard"
-docker rm -f "$NAME" >/dev/null
-jq '.password = ""' "${TESTDIR}/data/options.json" > "${TESTDIR}/data/options.json.tmp"
-mv "${TESTDIR}/data/options.json.tmp" "${TESTDIR}/data/options.json"
-out="$(docker run --rm \
-    -v "${TESTDIR}/data:/data" -v "${TESTDIR}/share:/share" \
-    "$IMAGE" 2>&1 || true)"
-if grep -q "the 'password' option is empty" <<<"$out"; then
-    ok "refuses to start without a password"
-else
-    bad "started (or failed differently) with an empty password:"
-    printf '%s\n' "$out" | tail -10 | sed 's/^/        /'
-fi
+step "9. Password is generated when none is configured"
+
+# Previously this refused to boot. Refusing is bad UX for something that can be
+# solved safely: generate a strong one and print it. Running UNauthenticated is
+# still not an option -- 6767 is published and the daemon holds a Supervisor
+# manager token.
+pwdir="${TESTDIR}/mode"
+cfg9="$(boot_with_options '{"connection_mode":"local"}')"
+
+check "starts with no password configured" \
+    sh -c "jq -e '.version == 1' <<<'$cfg9'"
+check "generated password is logged" \
+    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'Generated Paseo password'"
+check "generated password is persisted" \
+    test -s "${pwdir}/data/.paseo-generated-password"
+check "generated password is long enough" \
+    sh -c "[ \"\$(wc -c < '${pwdir}/data/.paseo-generated-password')\" -ge 20 ]"
+check "generated password file is not world readable" \
+    sh -c "[ \"\$(stat -c %a '${pwdir}/data/.paseo-generated-password')\" = 600 ]"
+
+# Restart against the same /data: it must reuse, not roll a new password on
+# every boot (which would silently break every saved client).
+pw_before="$(cat "${pwdir}/data/.paseo-generated-password")"
+docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
+docker run -d --name "${NAME}-mode" \
+    -v "${pwdir}/data:/data" -v "${pwdir}/share:/share" "$IMAGE" >/dev/null
+waited=0
+while ! docker logs "${NAME}-mode" 2>&1 | grep -q "connection mode:" && (( waited < 40 )); do
+    sleep 2; waited=$((waited + 2))
+done
+check "generated password is reused across restarts" \
+    sh -c "[ \"\$(cat '${pwdir}/data/.paseo-generated-password')\" = '$pw_before' ]"
+check "reuse is reported, not silently regenerated" \
+    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'reusing the generated one'"
+docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$pass" "$fail"

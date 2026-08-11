@@ -33,13 +33,23 @@ if [[ ! -f "$OPTIONS_FILE" ]]; then
     log "no /data/options.json (not running under Supervisor); using defaults"
 fi
 
-opt_str()  { jq -r  --arg d "$2" "$1 // \$d"  "$OPTIONS_FILE"; }
-opt_json() { jq -c              "$1 // $2"    "$OPTIONS_FILE"; }
+opt_str() { jq -r --arg d "$2" "$1 // \$d" "$OPTIONS_FILE"; }
+
+# Explicitly null-checked rather than using jq's `//`, which treats BOTH null
+# and false as absent -- so `.x // true` yields true even when x is literally
+# false, and every boolean option defaulting to true would ignore being turned
+# off. That silently defeated `expose_ha_config: false`, among others.
+opt_json() { jq -c "if ($1) == null then ($2) else ($1) end" "$OPTIONS_FILE"; }
 
 password="$(opt_str '.password' '')"
 hostnames="$(jq -r '(.hostnames // []) | join(",")' "$OPTIONS_FILE")"
 log_level="$(opt_str '.log_level' 'info')"
-relay_enabled="$(opt_json '.relay_enabled' 'false')"
+connection_mode="$(opt_str '.connection_mode' 'relay')"
+relay_endpoint="$(opt_str '.relay_endpoint' '')"
+relay_public_endpoint="$(opt_str '.relay_public_endpoint' '')"
+relay_use_tls="$(opt_json '.relay_use_tls' 'true')"
+relay_public_use_tls="$(opt_json '.relay_public_use_tls' 'true')"
+app_base_url="$(opt_str '.app_base_url' 'https://app.paseo.sh')"
 workspace_root="$(opt_str '.workspace_root' '/share/paseo/workspace')"
 expose_ha_config="$(opt_json '.expose_ha_config' 'true')"
 ha_mcp_url="$(opt_str '.ha_mcp_url' 'http://supervisor/core/mcp_server/sse')"
@@ -79,13 +89,85 @@ if [[ -n "${PASEO_PASSWORD:-}" ]]; then
     password="$PASEO_PASSWORD"
 fi
 
-if [[ -z "$password" ]]; then
-    fatal "the 'password' option is empty.
+# No password configured? Generate one rather than refusing to start.
+#
+# Running unauthenticated is not offered: unlike a typical desktop install --
+# which binds 127.0.0.1 and is unreachable from the network -- this add-on
+# publishes 6767 on the LAN, and the daemon holds a Supervisor token with
+# manager rights. Anyone who can reach the port could rewrite automations or
+# remove add-ons. Generating a strong password keeps setup zero-effort without
+# that trade.
+GENERATED_PASSWORD_FILE=/data/.paseo-generated-password
 
-Port 6767 is published on your LAN and this add-on holds a Supervisor token
-with manager rights, so Paseo will not be started without authentication.
-Set a password in the add-on Configuration tab and restart."
+if [[ -z "$password" ]]; then
+    if [[ -s "$GENERATED_PASSWORD_FILE" ]]; then
+        password="$(cat "$GENERATED_PASSWORD_FILE")"
+        log "no password configured; reusing the generated one"
+        log "  (shown on first start, and stored in ${GENERATED_PASSWORD_FILE})"
+    else
+        # 28 alphanumerics. dd/base64/cut avoids the SIGPIPE that `head -c`
+        # on /dev/urandom would trigger under pipefail.
+        password="$(dd if=/dev/urandom bs=32 count=1 2>/dev/null \
+                    | base64 | tr -dc 'A-Za-z0-9' | cut -c1-28)"
+        if [[ "${#password}" -lt 20 ]]; then
+            fatal "could not generate a password; set one in the Configuration tab"
+        fi
+        if (umask 077; printf '%s' "$password" > "$GENERATED_PASSWORD_FILE") 2>/dev/null; then
+            chown "${PASEO_UID}:${PASEO_GID}" "$GENERATED_PASSWORD_FILE" 2>/dev/null || true
+        else
+            warn "could not save the generated password; a new one will be"
+            warn "  generated on every restart until you set one yourself"
+        fi
+        log ""
+        log "============== Generated Paseo password =============="
+        log "  ${password}"
+        log ""
+        log "  No password was set, so this one was generated for you and"
+        log "  saved to ${GENERATED_PASSWORD_FILE}. Use it when adding this"
+        log "  host in the Paseo app. To choose your own, set the 'password'"
+        log "  option in the Configuration tab and restart."
+        log "======================================================"
+        log ""
+    fi
 fi
+
+# --- How clients reach this daemon ------------------------------------------
+#   relay        Paseo's hosted relay. Works with no VPN or router changes; a
+#                join link is printed to the add-on log.
+#   local        No relay. Direct connections only, from the LAN or a VPN.
+#   custom_relay A relay you run yourself (the image ships @getpaseo/relay).
+case "$connection_mode" in
+    relay)
+        relay_enabled=true
+        relay_endpoint=""          # empty => Paseo's hosted relay
+        relay_public_endpoint=""
+        ;;
+    local)
+        relay_enabled=false
+        relay_endpoint=""
+        relay_public_endpoint=""
+        ;;
+    custom_relay)
+        if [[ -z "$relay_endpoint" ]]; then
+            # Falling back to the hosted relay here would quietly send traffic
+            # somewhere the user explicitly chose not to use.
+            warn "connection_mode is 'custom_relay' but relay_endpoint is empty;"
+            warn "  falling back to 'local' (direct connections only)"
+            relay_enabled=false
+            connection_mode=local
+        else
+            relay_enabled=true
+        fi
+        ;;
+    *)
+        warn "unknown connection_mode '${connection_mode}'; falling back to 'local'"
+        relay_enabled=false
+        connection_mode=local
+        relay_endpoint=""
+        relay_public_endpoint=""
+        ;;
+esac
+log "connection mode: ${connection_mode}"
 
 export PASEO_PASSWORD="$password"
 export PASEO_LOG_LEVEL="$log_level"
@@ -188,6 +270,11 @@ fi
 # overwritten so edits made from the app survive a restart.
 # ---------------------------------------------------------------------------
 SEED_RELAY="$relay_enabled" \
+SEED_RELAY_ENDPOINT="$relay_endpoint" \
+SEED_RELAY_PUBLIC_ENDPOINT="$relay_public_endpoint" \
+SEED_RELAY_USE_TLS="$relay_use_tls" \
+SEED_RELAY_PUBLIC_USE_TLS="$relay_public_use_tls" \
+SEED_APP_BASE_URL="$app_base_url" \
 SEED_WORKTREE_ROOT="$workspace_root" \
 SEED_PROVIDER_OVERRIDES="$provider_overrides" \
 gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-seed-config
@@ -212,6 +299,7 @@ fi
 EXPOSE_HA_CONFIG="$expose_ha_config" \
 PRINT_PAIRING_LINK="$print_pairing_link" \
 RELAY_ENABLED="$relay_enabled" \
+CONNECTION_MODE="$connection_mode" \
 gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-postboot after-start &
 
 log "starting Paseo (state in ${PASEO_HOME}, workspaces in ${workspace_root})"

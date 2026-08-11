@@ -110,9 +110,11 @@ schema:
   services:
     - str
   shims:
-    - name: str
+    - target: str?
+      name: str?
       command: str?
       env_from: str?
+      require_port: port?
       script: str?
       passthrough:
         - str?

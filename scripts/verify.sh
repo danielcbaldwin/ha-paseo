@@ -306,6 +306,8 @@ cat > "${shimdir}/data/options.json" <<'SHIMEOF'
  "shims":[{"name":"claude","command":"echo WRAPPED real=$REAL","passthrough":["--version"]},
           {"name":"env","env_from":"echo export SHIM_ENV_OK=1"},
           {"name":"jq","env_from":"echo export SHIM_ENV_OK=1"},
+          {"target":"/usr/bin/printenv","env_from":"echo export SHIM_PORT_OK=1","require_port":9999},
+          {"target":"/usr/local/bin/nope-does-not-exist","command":"echo x"},
           {"name":"../evil","command":"echo nope"}]}
 SHIMEOF
 docker rm -f "${NAME}-shim" >/dev/null 2>&1 || true
@@ -334,6 +336,21 @@ check "env_from applies the environment and execs the real binary" \
 check "env_from shim leaves stdout byte-identical to the real binary" \
     sh -c "[ \"\$(docker exec ${NAME}-shim gosu paseo bash -lc 'jq --version')\" \
           = \"\$(docker exec ${NAME}-shim /usr/bin/jq --version)\" ]"
+# An explicit absolute target removes PATH resolution, so a shim cannot resolve
+# back to itself and fork-bomb the container.
+check "target shim hardcodes the absolute path" \
+    sh -c "docker exec ${NAME}-shim grep -q '^REAL=/usr/bin/printenv$' /run/ha-paseo/shims/printenv"
+check "a missing target is rejected at startup, not at runtime" \
+    sh -c "docker logs ${NAME}-shim 2>&1 | grep -q 'nope-does-not-exist.*not executable'"
+# teamclaude env prints its exports even when the proxy is down, merely
+# commenting that nothing listens. Evaluating that points the command at a dead
+# port -- the hang this guard exists to prevent.
+check "require_port guard is present in the generated shim" \
+    sh -c "docker exec ${NAME}-shim grep -q 'dev/tcp/127.0.0.1/9999' /run/ha-paseo/shims/printenv"
+check "require_port skips the eval when the port is closed" \
+    sh -c "! docker exec ${NAME}-shim gosu paseo bash -lc 'printenv' | grep -q '^SHIM_PORT_OK=1$'"
+check "the real binary still runs when the eval is skipped" \
+    sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'printenv HOME' | grep -q /data/home"
 check "shims live outside /share and /data" \
     sh -c "! test -e '${shimdir}/share/paseo/bin/claude' && ! test -e '${shimdir}/data/claude'"
 docker rm -f "${NAME}-shim" >/dev/null 2>&1 || true

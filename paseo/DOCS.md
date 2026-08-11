@@ -352,17 +352,20 @@ Intercepting every caller needs a **real executable earlier on `PATH`**. The
 
 ```yaml
 shims:
-  - name: claude
+  - target: /usr/local/bin/claude
     env_from: teamclaude env --no-mitm
+    require_port: 3456
     passthrough: ["--version", "-v", "auth", "doctor", "mcp", "update"]
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Command to intercept. Must be a plain filename; `../` is rejected. |
+| `target` | **Absolute path** of the binary being wrapped. Preferred: no PATH guessing, and a wrong path is reported at startup instead of failing later. |
+| `name` | Command name to intercept. Defaults to the target's basename. |
 | `env_from` | Run this, `eval` its stdout, then exec the **real** command. For proxies and account routers. |
 | `command` | Run this **instead**. The caller's arguments are appended. |
 | `script` | A full shell body, with `"$@"` and `$REAL` in scope. Escape hatch. |
+| `require_port` | Only run `env_from` if something is listening on this local port. |
 | `passthrough` | First arguments that bypass the wrapper and go straight to the real binary. |
 
 Use exactly one of `env_from`, `command` or `script`.
@@ -402,10 +405,16 @@ services:
   - teamclaude server --headless
 
 shims:
-  - name: claude
+  - target: /usr/local/bin/claude
     env_from: teamclaude env --no-mitm
+    require_port: 3456
     passthrough: ["--version", "-v", "auth", "doctor", "mcp", "update"]
 ```
+
+**`require_port` is not optional here.** `teamclaude env` prints
+`ANTHROPIC_BASE_URL` whether or not the proxy is running — it only *comments*
+that nothing is listening. Without the guard, a down proxy points `claude` at a
+dead port and it hangs. With it, a down proxy degrades to plain `claude`.
 
 `teamclaude service install` writes a systemd user unit and there is no systemd
 in a container — `services` is the equivalent, and supervises it the same way.

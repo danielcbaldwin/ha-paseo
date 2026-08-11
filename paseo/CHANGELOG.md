@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1-9
+
+Three real bugs in the shim support added in 0.3.1-7/-8, all of which could
+present as a hang:
+
+- **`require_port` did not exist.** It was documented and parsed but never
+  written into the generated shim; the edit that was meant to add it silently
+  failed to apply and the test that "confirmed" it checked the wrong binary.
+  Now implemented, with tests for both the open and closed cases.
+- **The PATH guard was prefix-only.** If the shim directory was not *first* on
+  PATH it was not removed, so the shim resolved itself and exec'd itself —
+  a fork bomb, indistinguishable from a hang. Now removes every occurrence.
+- **`target`** (an absolute path) can now be given instead of a bare name. That
+  removes PATH resolution from the shim entirely, so recursion is structurally
+  impossible, and a wrong path is reported in the log at startup rather than
+  failing at runtime.
+
 ## 0.3.1-8
 
 - **Fixed the recommended TeamClaude shim, which hung.** `command: teamclaude

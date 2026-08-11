@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1-6
+
+- **Background services.** Tools that are servers rather than one-shot binaries
+  — a TeamClaude proxy, say — can now run alongside the agents:
+  - the `services` option, a list of commands, each supervised and restarted on
+    exit with backoff from 2s to a 60s ceiling
+  - `/share/paseo/services/` — any executable there runs as a service with no
+    config edit
+  - output prefixed `[svc:<name>]` into the add-on log, with duplicate names
+    disambiguated
+- **`init_commands`** for one-shot setup at each start. Failures are logged and
+  startup continues.
+
 ## 0.3.1-5
 
 - **Fixed: a duplicate "Home Assistant" workspace was created on every restart.**

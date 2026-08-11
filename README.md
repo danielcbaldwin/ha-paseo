@@ -99,6 +99,9 @@ Full documentation: [`paseo/DOCS.md`](paseo/DOCS.md).
 - `ha-inventory`, live discovery of your entities, services and areas
 - `agent-login`, which tells you which providers are authenticated and exactly
   what to run for the ones that aren't
+- Run your own **background services** (`services`, or drop an executable in
+  `/share/paseo/services/`) — supervised and restarted, for tools that are
+  servers rather than CLIs
 - All credentials and state persisted across add-on updates
 
 ### The agents actually know Home Assistant

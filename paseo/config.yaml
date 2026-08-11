@@ -76,6 +76,8 @@ options:
   print_pairing_link: true
   extra_npm_packages: []
   extra_apt_packages: []
+  init_commands: []
+  services: []
 
 # A trailing `?` marks a field optional. Without it Home Assistant shows the
 # field as required (with a `*`) and will not let the form be saved empty --
@@ -101,4 +103,8 @@ schema:
   extra_npm_packages:
     - str
   extra_apt_packages:
+    - str
+  init_commands:
+    - str
+  services:
     - str

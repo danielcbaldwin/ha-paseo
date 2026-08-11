@@ -223,6 +223,8 @@ works, prefer it — it keeps a key off disk entirely.
 | `print_pairing_link` | `true` | Print the relay join URL to the add-on log at startup. No effect in `local` mode. |
 | `extra_npm_packages` | `[]` | Installed into the persistent `/data/home/.npm-global` at each boot. |
 | `extra_apt_packages` | `[]` | Installed at each boot. Not persistent — apt state is in the image layer. |
+| `init_commands` | `[]` | One-shot commands run at each start, before the daemon. Failures are logged, not fatal. |
+| `services` | `[]` | Long-running commands, supervised and restarted with backoff. See below. |
 
 ---
 
@@ -327,6 +329,68 @@ If you are porting a wrapper from another machine, remember to repoint whatever
 it uses as the real binary at `/usr/local/bin/claude`.
 
 ---
+
+## Running your own commands and services
+
+Some tools you want alongside the agents are servers, not one-shot binaries —
+a TeamClaude proxy being the obvious case. Two options cover that.
+
+### `services` — long-running, supervised
+
+A list of shell commands. Each runs as the `paseo` user in a login shell (so
+`/share/paseo/bin` and your `update-agents` overrides are on `PATH`), and is
+**restarted if it exits**, with backoff doubling from 2s to a 60s ceiling so a
+broken command cannot hot-loop the machine.
+
+```yaml
+services:
+  - teamclaude serve --port 8088
+  - python3 /share/paseo/bin/metrics.py
+```
+
+Output is prefixed and lands in the add-on log next to everything else:
+
+```
+[svc:teamclaude] listening on :8088
+[svc:teamclaude] exited; restarting in 2s
+```
+
+Services are named after the command's first word. Two commands starting with
+the same word get `-2`, `-3` suffixes so the log stays readable.
+
+### `/share/paseo/services/` — drop-in scripts
+
+Any **executable** file in that directory is run as a service too, with no
+config edit. Useful when the thing you are running deserves to be a real script
+you can version outside the add-on:
+
+```bash
+# /share/paseo/services/teamclaude.sh
+#!/bin/sh
+exec teamclaude serve --port 8088
+```
+
+`chmod +x` it — non-executable files are skipped with a warning rather than
+silently ignored.
+
+### `init_commands` — one-shot, at startup
+
+Runs once each start, in order, before the daemon. For setup rather than
+servers. A failure is logged and startup continues, so a broken command cannot
+take the add-on down:
+
+```yaml
+init_commands:
+  - git config --global user.email "me@example.com"
+```
+
+For installing packages, prefer `extra_apt_packages` / `extra_npm_packages`.
+
+### Reaching a service you started
+
+These run inside the add-on container. Other processes in the container reach
+them on `127.0.0.1:<port>`. To reach one from **outside**, add the port under
+the add-on's **Network** section — nothing is published automatically.
 
 ## How state is stored
 

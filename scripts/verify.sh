@@ -23,7 +23,7 @@ ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; fail=$((fail + 1)); }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
-cleanup() { docker rm -f "$NAME" "${NAME}-mode" "${NAME}-opt" >/dev/null 2>&1 || true; kill "${STUB_PID:-}" 2>/dev/null || true; rm -f "${ENVDUMP:-}"; }
+cleanup() { docker rm -f "$NAME" "${NAME}-mode" "${NAME}-svc" >/dev/null 2>&1 || true; kill "${STUB_PID:-}" 2>/dev/null || true; rm -f "${ENVDUMP:-}"; }
 trap cleanup EXIT
 
 check() {  # check <description> <command...>
@@ -284,6 +284,42 @@ cfg9="$(boot_with_options '{"connection_mode":"relay","password":"averylongtestp
 check "password set binds 0.0.0.0 even on relay" \
     sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'listening on 0.0.0.0:6767'"
 docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
+step "10. init_commands and background services"
+
+svcdir="${TESTDIR}/svc"
+rm -rf "$svcdir"; mkdir -p "$svcdir"/{data,share/paseo/services}
+cat > "${svcdir}/data/options.json" <<'SVCEOF'
+{"connection_mode":"local","password":"verifysvcpassword12345",
+ "init_commands":["echo hello-from-init","false"],
+ "services":["sh -c 'while true; do echo tick; sleep 3; done'","sh -c 'echo dying; exit 3'"]}
+SVCEOF
+printf '#!/bin/sh\nwhile true; do echo from-dropin; sleep 3; done\n' \
+    > "${svcdir}/share/paseo/services/dropin.sh"
+chmod +x "${svcdir}/share/paseo/services/dropin.sh"
+
+docker rm -f "${NAME}-svc" >/dev/null 2>&1 || true
+docker run -d --name "${NAME}-svc" \
+    -v "${svcdir}/data:/data" -v "${svcdir}/share:/share" "$IMAGE" >/dev/null
+waited=0
+while ! docker logs "${NAME}-svc" 2>&1 | grep -q "restarting in 4s" && (( waited < 60 )); do
+    sleep 3; waited=$((waited + 3))
+done
+
+check "init_commands run"                sh -c "docker logs ${NAME}-svc 2>&1 | grep -q 'hello-from-init'"
+check "a failing init_command does not stop startup" \
+    sh -c "docker logs ${NAME}-svc 2>&1 | grep -q 'init command failed'"
+check "daemon still starts after services" \
+    sh -c "docker logs ${NAME}-svc 2>&1 | grep -q 'starting daemon on'"
+check "option service runs"              sh -c "docker logs ${NAME}-svc 2>&1 | grep -q '\[svc:sh\] tick'"
+check "drop-in directory service runs"   sh -c "docker logs ${NAME}-svc 2>&1 | grep -q '\[svc:dropin.sh\] from-dropin'"
+check "dead service is restarted"        sh -c "docker logs ${NAME}-svc 2>&1 | grep -q 'exited; restarting'"
+check "restart backs off exponentially"  sh -c "docker logs ${NAME}-svc 2>&1 | grep -q 'restarting in 4s'"
+# Two `sh -c` services would otherwise both log as [svc:sh].
+check "duplicate service names disambiguated" \
+    sh -c "docker logs ${NAME}-svc 2>&1 | grep -q '\[svc:sh-2\]'"
+docker rm -f "${NAME}-svc" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$pass" "$fail"

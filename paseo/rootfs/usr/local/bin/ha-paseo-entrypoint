@@ -71,6 +71,8 @@ fi
 extra_npm="$(jq -r '(.extra_npm_packages // []) | join(" ")' "$OPTIONS_FILE")"
 extra_apt="$(jq -r '(.extra_apt_packages // []) | join(" ")' "$OPTIONS_FILE")"
 auto_update_agents="$(opt_json '.auto_update_agents' 'false')"
+services_json="$(jq -c '(.services // []) | map(select(type == "string"))' "$OPTIONS_FILE")"
+init_commands_json="$(jq -c '(.init_commands // []) | map(select(type == "string"))' "$OPTIONS_FILE")"
 print_pairing_link="$(opt_json '.print_pairing_link' 'true')"
 
 # API keys for providers whose login flow does not work well headless -- Gemini
@@ -216,6 +218,7 @@ ensure_dir() {
 ensure_dir /data/home
 ensure_dir "$workspace_root"
 ensure_dir /share/paseo/bin
+ensure_dir /share/paseo/services
 
 # A restored backup or a hand-edited /share can leave files owned by the wrong
 # uid. Do the expensive recursive pass once, then never again -- worktrees get
@@ -259,6 +262,25 @@ if [[ "$auto_update_agents" == "true" ]]; then
     gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/update-agents all \
         || warn "agent auto-update failed; continuing with the versions already installed"
 fi
+
+# ---------------------------------------------------------------------------
+# User commands and services
+#
+# init_commands run once, in order, and are allowed to fail without taking the
+# add-on down. Services are long-running and supervised; see ha-paseo-services.
+# ---------------------------------------------------------------------------
+while IFS= read -r cmd; do
+    if [[ -z "$cmd" ]]; then
+        continue
+    fi
+    log "init: ${cmd}"
+    gosu "${PASEO_UID}:${PASEO_GID}" bash -lc "$cmd" 2>&1 | sed "s/^/[init] /" \
+        || warn "init command failed (continuing): ${cmd}"
+done < <(jq -r '.[]?' <<<"$init_commands_json")
+
+SERVICES_JSON="$services_json" \
+gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-services || \
+    warn "failed to start background services"
 
 # ---------------------------------------------------------------------------
 # Paseo config

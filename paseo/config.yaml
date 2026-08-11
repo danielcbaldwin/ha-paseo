@@ -17,8 +17,6 @@ arch:
 # The upstream image supplies tini as PID 1; no s6-overlay here.
 init: false
 startup: services
-boot: auto
-hostname: paseo
 
 ports:
   6767/tcp: 6767

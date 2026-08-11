@@ -236,12 +236,14 @@ rather than something to pretend is already done.
 
 ## Updating Paseo
 
-The base image is pinned by digest in `paseo/build.yaml` so an upstream retag
-never changes what you are running. To move to a new Paseo release:
+The base image is pinned to an exact upstream release tag in `paseo/build.yaml`,
+never `latest`. The add-on linter rejects digest references there, so the
+resolved digest is recorded in a comment alongside it for audit rather than
+enforced by the build. To move to a new Paseo release:
 
 1. Confirm the tag has both `linux/amd64` and `linux/arm64`.
-2. Update the digest in `build.yaml` and the `version` in `config.yaml`
-   (`<upstream>-<addon revision>`, e.g. `0.3.2-1`).
+2. Update both `build_from` lines and the digest comment in `build.yaml`, and
+   the `version` in `config.yaml` (`<upstream>-<addon revision>`, e.g. `0.3.2-1`).
 3. Add a `CHANGELOG.md` entry, tag `v0.3.2-1`, and let CI publish.
 
 ---

@@ -7,7 +7,9 @@
 # gosu, tini, openssh-client and procps, so this layer only adds the agent
 # CLIs, the Home Assistant tooling, and the Supervisor glue.
 
-ARG BUILD_FROM=ghcr.io/getpaseo/paseo@sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
+# Overridden by build.yaml's build_from under the Home Assistant builder.
+# 0.3.1 -> sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
+ARG BUILD_FROM=ghcr.io/getpaseo/paseo:0.3.1
 FROM ${BUILD_FROM}
 
 ARG BUILD_ARCH=amd64

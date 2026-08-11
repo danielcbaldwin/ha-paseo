@@ -1,13 +1,17 @@
 ---
-# Pinned by digest so an upstream `latest` retag never silently changes what
-# this add-on ships. Both architectures resolve from the same multi-arch index;
-# Docker selects the right platform at build time.
+# Pinned to an exact upstream release rather than `latest`. The add-on linter
+# rejects digest references here (build_from must be a tag), so this is a tag --
+# the digest it resolved to at the time is recorded below for audit:
 #
-# To bump: check the new tag exists for both platforms, then update the digest
-# here and the version in config.yaml. See DOCS.md, "Updating Paseo".
+#   0.3.1 -> sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
+#
+# Both architectures resolve from the same multi-arch index; the builder selects
+# the right platform. To bump: confirm the new tag has linux/amd64 and
+# linux/arm64, update both lines here, the digest comment, and the version in
+# config.yaml. See DOCS.md, "Updating Paseo".
 build_from:
-  amd64: ghcr.io/getpaseo/paseo@sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
-  aarch64: ghcr.io/getpaseo/paseo@sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
+  amd64: ghcr.io/getpaseo/paseo:0.3.1
+  aarch64: ghcr.io/getpaseo/paseo:0.3.1
 
 args:
   HA_CLI_VERSION: "5.3.0"

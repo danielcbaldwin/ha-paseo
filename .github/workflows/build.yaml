@@ -41,22 +41,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The tag is the source of truth for the version, NOT config.yaml.
+      #
+      # Supervisor reads config.yaml from the default branch and pulls
+      # <image>:<that version>. If main advertises a version before the images
+      # exist, every instance offers an update that fails with
+      # "manifest unknown". So config.yaml is rewritten here in the workspace
+      # (never committed at this point) and main is only bumped by the `bump`
+      # job below, after both architectures have actually published.
       - name: Derive the add-on version
         id: meta
         run: |
-          version="$(yq -r '.version' paseo/config.yaml)"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          # Only tag pushes publish. Everything else is a build-only check.
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            tag_version="${GITHUB_REF#refs/tags/v}"
-            if [[ "${tag_version}" != "${version}" ]]; then
-              echo "::error::tag v${tag_version} does not match config.yaml version ${version}"
-              exit 1
-            fi
+            version="${GITHUB_REF#refs/tags/v}"
+            yq -i ".version = \"${version}\"" paseo/config.yaml
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
+            version="$(yq -r '.version' paseo/config.yaml)"
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "building version ${version}"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -82,3 +87,35 @@ jobs:
             --image ha-paseo-{arch}
             --docker-hub ghcr.io/danielcbaldwin
             --addon
+
+  # Only now, with images on GHCR for every architecture, is it safe to tell
+  # Home Assistant a new version exists. Doing this before the build is what
+  # produced "Can't install ...: [404] manifest unknown" on every instance.
+  bump:
+    name: Advertise the published version
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Point config.yaml at the published version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/v}"
+          current="$(yq -r '.version' paseo/config.yaml)"
+          if [[ "$current" == "$version" ]]; then
+            echo "main already advertises ${version}; nothing to do"
+            exit 0
+          fi
+          yq -i ".version = \"${version}\"" paseo/config.yaml
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # [skip ci] -- this commit changes only the advertised version, and
+          # the images it points at were just built.
+          git commit -am "Advertise add-on version ${version} [skip ci]"
+          git push origin main

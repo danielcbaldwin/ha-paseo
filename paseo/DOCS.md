@@ -441,9 +441,21 @@ resolved digest is recorded in a comment alongside it for audit rather than
 enforced by the build. To move to a new Paseo release:
 
 1. Confirm the tag has both `linux/amd64` and `linux/arm64`.
-2. Update both `build_from` lines and the digest comment in `build.yaml`, and
-   the `version` in `config.yaml` (`<upstream>-<addon revision>`, e.g. `0.3.2-1`).
-3. Add a `CHANGELOG.md` entry, tag `v0.3.2-1`, and let CI publish.
+2. Update both `build_from` lines and the digest comment in `build.yaml`.
+3. Add a `CHANGELOG.md` entry, push, then tag `v0.3.2-1`.
+
+**Do not edit `version` in `config.yaml` by hand.** The tag is the source of
+truth; CI writes the version into the image it builds and then commits the bump
+to `main` itself, but only once both architectures have published.
+
+That ordering matters. Supervisor reads `config.yaml` from the default branch
+and pulls `<image>:<that version>`. Bumping it before the images exist makes
+every instance offer an update that fails with `[404] manifest unknown` — which
+is exactly what happened releasing `0.3.1-2`. Releasing is now just:
+
+```bash
+git tag -a v0.3.2-1 -m "..." && git push origin v0.3.2-1
+```
 
 ---
 

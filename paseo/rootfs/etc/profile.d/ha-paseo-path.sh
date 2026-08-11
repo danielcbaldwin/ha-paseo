@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # Debian's /etc/profile assigns PATH unconditionally, which wipes the
 # directories set via ENV in the image whenever a LOGIN shell starts -- and a
 # terminal pane in the Paseo UI is a login shell. Without this, user-installed

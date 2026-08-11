@@ -249,9 +249,24 @@ check "print_pairing_link:false is honoured" \
 step "8. Restart persistence"
 marker="persist-$$"
 in_container sh -c "mkdir -p /data/home/.claude && echo $marker > /data/home/.claude/verify-marker"
+
+# Registration runs in the background after the daemon answers health checks.
+# Restarting before it finishes makes the "already registered" assertion below
+# race, so wait for the first boot to actually get there.
+waited=0
+while ! docker logs "$NAME" 2>&1 | grep -qE "(already )?registered .*/homeassistant|registered /homeassistant" \
+      && (( waited < 60 )); do
+    sleep 3; waited=$((waited + 3))
+done
+
 docker rm -f "$NAME" >/dev/null
 start_container
 wait_healthy || exit 1
+# Same again for the second boot before asserting on its log.
+waited=0
+while ! docker logs "$NAME" 2>&1 | grep -q "already registered" && (( waited < 60 )); do
+    sleep 3; waited=$((waited + 3))
+done
 check "credential dir survived restart" \
     sh -c "[ \"\$(docker exec $NAME cat /data/home/.claude/verify-marker)\" = $marker ]"
 check "config.json survived restart" \

@@ -195,6 +195,7 @@ register_workspace() {
             break
         fi
         list=""
+        log "workspace list not readable yet (attempt ${attempt}/5); retrying"
         sleep 3
     done
 

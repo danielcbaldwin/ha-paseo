@@ -52,7 +52,15 @@ if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
     die "tag v${VERSION} already exists locally"
 fi
 
-# 4. A changelog entry is part of a release, not an optional extra.
+# 4. Lint before tagging. CI runs the same shellcheck, and discovering a
+#    warning there means deleting and recreating a tag that already exists.
+if command -v docker >/dev/null 2>&1; then
+    ./scripts/lint.sh || die "shellcheck failed; fix before tagging"
+else
+    echo "docker unavailable; skipping local shellcheck (CI will still run it)"
+fi
+
+# 5. A changelog entry is part of a release, not an optional extra.
 grep -q "^## ${VERSION}\$" paseo/CHANGELOG.md \
     || die "no '## ${VERSION}' section in paseo/CHANGELOG.md"
 

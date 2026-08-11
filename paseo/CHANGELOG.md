@@ -11,6 +11,7 @@
   - a successful registration is recorded in
     `/data/.ha-paseo-workspace-registered`, so an unreadable list still creates
     the *first* workspace but can never add a second
+  - retries are logged, so a slow start is visible rather than silent
 
 ## 0.3.1-10
 

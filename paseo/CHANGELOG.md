@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1-11
+
+- **Fixed: a fresh install could end up with no Home Assistant workspace.**
+  `0.3.1-5` stopped registering one whenever the workspace list could not be
+  read, to end the duplicate-per-restart bug. That traded one failure for its
+  opposite. Now:
+  - the list is retried a few times before giving up, since the CLI can fail
+    briefly just after the daemon starts answering health checks
+  - a successful registration is recorded in
+    `/data/.ha-paseo-workspace-registered`, so an unreadable list still creates
+    the *first* workspace but can never add a second
+
 ## 0.3.1-10
 
 - **`ha-paseo-doctor`** — one command that dumps live state: bind address and

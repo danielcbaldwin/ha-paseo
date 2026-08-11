@@ -16,6 +16,10 @@ HA_DIR=/homeassistant
 SHARE=/usr/share/ha-paseo
 GUIDE="${SHARE}/home-assistant.md"
 HEALTH_URL="http://127.0.0.1:6767/api/health"
+# Records that a /homeassistant workspace has been created at least once, so a
+# transient failure to read the workspace list cannot add a duplicate on every
+# restart -- while still letting a fresh install get one.
+REGISTERED_MARKER=/data/.ha-paseo-workspace-registered
 
 # Managed files are rewritten on every boot so add-on updates actually reach the
 # agents. User-facing files in /homeassistant are only created if missing, so
@@ -181,23 +185,39 @@ print_pairing() {
 }
 
 register_workspace() {
-    local list
+    local list="" attempt
 
-    # Fail safe: if the list cannot be read, do NOT register. An extra
-    # workspace on every restart is far worse than none, and the user can
-    # always add it from the app.
-    if ! list="$(paseo workspace ls --json 2>/dev/null)" \
-       || ! jq -e 'type == "array"' <<<"$list" >/dev/null 2>&1; then
-        warn "could not list workspaces; skipping registration of ${HA_DIR}"
-        return 0
-    fi
+    # The list is the authority, so try harder than once to get it -- the CLI
+    # can fail transiently just after the daemon starts accepting health checks.
+    for attempt in 1 2 3 4 5; do
+        if list="$(paseo workspace ls --json 2>/dev/null)" \
+           && jq -e 'type == "array"' <<<"$list" >/dev/null 2>&1; then
+            break
+        fi
+        list=""
+        sleep 3
+    done
 
-    # Entries expose the directory as `cwd`. There is no `path` key -- matching
-    # one meant this test never hit, so a duplicate "Home Assistant" workspace
-    # was created on every single restart.
-    if jq -e --arg p "$HA_DIR" 'any(.[]?; .cwd == $p)' <<<"$list" >/dev/null 2>&1; then
-        log "workspace for ${HA_DIR} already registered"
-        return 0
+    if [[ -n "$list" ]]; then
+        # Entries expose the directory as `cwd`. There is no `path` key --
+        # matching one meant this test never hit, and a duplicate "Home
+        # Assistant" workspace was created on every single restart.
+        if jq -e --arg p "$HA_DIR" 'any(.[]?; .cwd == $p)' <<<"$list" >/dev/null 2>&1; then
+            log "workspace for ${HA_DIR} already registered"
+            : > "$REGISTERED_MARKER" 2>/dev/null || true
+            return 0
+        fi
+    else
+        # Could not read the list at all. Registering blindly on every restart
+        # is what produced the duplicates, but refusing outright left fresh
+        # installs with no workspace. The marker splits the difference: create
+        # one if we have never successfully created one, and never a second.
+        if [[ -f "$REGISTERED_MARKER" ]]; then
+            warn "could not list workspaces; one was registered previously, so"
+            warn "  not adding another. Add it from the app if it is missing."
+            return 0
+        fi
+        warn "could not list workspaces; registering ${HA_DIR} anyway (first run)"
     fi
 
     if paseo workspace create \
@@ -205,6 +225,7 @@ register_workspace() {
         --path "$HA_DIR" \
         --title "Home Assistant" >/dev/null 2>&1; then
         log "registered ${HA_DIR} as a Paseo workspace"
+        : > "$REGISTERED_MARKER" 2>/dev/null || true
     else
         warn "could not register ${HA_DIR} as a workspace; add it from the app"
     fi

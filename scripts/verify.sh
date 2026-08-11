@@ -265,6 +265,13 @@ ws_count="$(docker exec -e PASEO_PASSWORD=verify-secret "$NAME" gosu paseo sh -l
     2>/dev/null || echo "?")"
 check "exactly one /homeassistant workspace after a restart" \
     sh -c "[ '$ws_count' = '1' ]"
+# Registering nothing when the list is unreadable left fresh installs with no
+# workspace at all. The marker records a successful registration, so a transient
+# read failure can still create the first one without ever adding a second.
+check "a successful registration is recorded" \
+    in_container test -f /data/.ha-paseo-workspace-registered
+check "the restart reported it as already registered, not re-created" \
+    sh -c "docker logs $NAME 2>&1 | grep -q 'already registered'"
 
 # ---------------------------------------------------------------------------
 step "9. Password is optional; the bind address follows it"

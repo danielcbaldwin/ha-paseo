@@ -54,7 +54,9 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/v}"
-            yq -i ".version = \"${version}\"" paseo/config.yaml
+            # sed, not `yq -i`: yq rewrites the whole document and strips the
+            # blank lines and formatting that make config.yaml readable.
+            sed -i -E "s|^version: .*|version: \"${version}\"|" paseo/config.yaml
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             version="$(yq -r '.version' paseo/config.yaml)"
@@ -112,7 +114,7 @@ jobs:
             echo "main already advertises ${version}; nothing to do"
             exit 0
           fi
-          yq -i ".version = \"${version}\"" paseo/config.yaml
+          sed -i -E "s|^version: .*|version: \"${version}\"|" paseo/config.yaml
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # [skip ci] -- this commit changes only the advertised version, and

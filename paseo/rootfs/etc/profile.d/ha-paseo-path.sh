@@ -9,5 +9,5 @@
 
 case ":${PATH}:" in
     *":/share/paseo/bin:"*) ;;
-    *) PATH="/data/home/.npm-global/bin:/share/paseo/bin:${PATH}"; export PATH ;;
+    *) PATH="/run/ha-paseo/shims:/share/paseo/bin:/data/home/.npm-global/bin:${PATH}"; export PATH ;;
 esac

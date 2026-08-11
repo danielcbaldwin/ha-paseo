@@ -112,7 +112,7 @@ ENV HOME=/data/home \
     NPM_CONFIG_PREFIX=/data/home/.npm-global \
     NPM_CONFIG_CACHE=/data/home/.cache/npm \
     GIT_CONFIG_GLOBAL=/data/home/.gitconfig \
-    PATH=/data/home/.npm-global/bin:/share/paseo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=/run/ha-paseo/shims:/share/paseo/bin:/data/home/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # gosu -- used both by the upstream entrypoint and by this add-on -- derives
 # $HOME from /etc/passwd and re-exports it, which drags child processes back to
@@ -135,7 +135,8 @@ RUN chmod +x /usr/local/bin/ha-paseo-entrypoint \
              /usr/local/bin/ha-inventory \
              /usr/local/bin/update-agents \
              /usr/local/bin/agent-login \
-             /usr/local/bin/ha-paseo-services
+             /usr/local/bin/ha-paseo-services \
+             /usr/local/bin/ha-paseo-shims
 
 LABEL \
     io.hass.name="Paseo" \

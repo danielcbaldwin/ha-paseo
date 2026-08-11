@@ -225,6 +225,7 @@ works, prefer it — it keeps a key off disk entirely.
 | `extra_apt_packages` | `[]` | Installed at each boot. Not persistent — apt state is in the image layer. |
 | `init_commands` | `[]` | One-shot commands run at each start, before the daemon. Failures are logged, not fatal. |
 | `services` | `[]` | Long-running commands, supervised and restarted with backoff. See below. |
+| `shims` | `[]` | Intercept a command name (e.g. `claude`) with a wrapper, for every caller. See Shims. |
 
 ---
 
@@ -309,8 +310,10 @@ back. `hass-api` and `ha-inventory` work from Codex regardless.
 
 Two seams, no add-on changes required.
 
-`/share/paseo/bin` is on `PATH`. Drop a wrapper script there (via Samba, the
-file editor add-on, or `scp`) and point a provider at it with
+`/share/paseo/bin` is **first** on `PATH` — ahead of the bundled agent CLIs and
+any `update-agents` override — so a wrapper there wins everywhere. Drop a script
+in (via Samba, the file editor add-on, or `scp`) and optionally point a provider
+at it with
 `provider_overrides` — a JSON **string**, since Supervisor options have no JSON
 type:
 
@@ -329,6 +332,86 @@ If you are porting a wrapper from another machine, remember to repoint whatever
 it uses as the real binary at `/usr/local/bin/claude`.
 
 ---
+
+## Shims: intercepting a command like `claude`
+
+`teamclaude alias --install` — and any other `alias`-based approach — **cannot
+work with Paseo**, and this is not an add-on limitation. It writes:
+
+```
+alias claude='teamclaude run --'
+```
+
+Shell aliases exist only in *interactive* shells and are **not inherited across
+`execve`**. Paseo spawns the `claude` binary directly, so no shell is ever
+consulted. TeamClaude's own help says as much under `env`: *"handy for agent
+multiplexers that spawn claude themselves instead of via `teamclaude run`"*.
+
+Intercepting every caller needs a **real executable earlier on `PATH`**. The
+`shims` option builds one for you:
+
+```yaml
+shims:
+  - name: claude
+    command: teamclaude run --no-mitm --
+    passthrough:
+      - --version
+      - -v
+      - auth
+      - doctor
+      - mcp
+      - update
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Command to intercept. Must be a plain filename; `../` is rejected. |
+| `command` | What to run instead. The caller's arguments are appended. |
+| `passthrough` | First arguments that bypass the wrapper and go straight to the real binary. |
+
+Shims are written to `/run/ha-paseo/shims`, which is **first on `PATH`** — ahead
+of `/share/paseo/bin`, `update-agents` overrides and the bundled CLIs. They are
+regenerated on every start and live nowhere else, so **nothing is written to
+`/share` or `/data`** and deleting the option deletes the shim.
+
+Two things the generated shim handles that a hand-written one usually gets wrong:
+
+- **Recursion.** The shim directory is removed from `PATH` before your command
+  runs, so a wrapper that itself invokes `claude` finds the real binary rather
+  than re-entering the shim and forking until the container dies.
+- **`$REAL`.** Set to the absolute path of the command being shadowed, so a
+  wrapper can `exec "$REAL" "$@"` directly.
+
+`passthrough` matters more than it looks: Paseo probes providers with
+`--version` and `auth status` concurrently on every provider-features request.
+Routing those through a proxy makes the daemon wait on it, which can stall its
+websocket.
+
+### Full TeamClaude setup
+
+```yaml
+extra_npm_packages:
+  - "@karpeleslab/teamclaude"
+
+services:
+  - teamclaude server --headless
+
+shims:
+  - name: claude
+    command: teamclaude run --no-mitm --
+    passthrough: ["--version", "-v", "auth", "doctor", "mcp", "update"]
+```
+
+`teamclaude service install` writes a systemd user unit and there is no systemd
+in a container — `services` is the equivalent, and supervises it the same way.
+`--no-mitm` is worth keeping: MITM mode exports `HTTPS_PROXY`, which MCP servers
+injected into agents inherit, tunnelling unrelated traffic through the proxy.
+
+Log in once with `teamclaude login` from a terminal pane; credentials persist
+under `/data/home`.
+
+To pin specific workspaces to specific accounts, set `TC_ACCT` per provider via
+`provider_overrides` rather than branching inside the shim.
 
 ## Running your own commands and services
 

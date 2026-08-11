@@ -72,6 +72,7 @@ extra_npm="$(jq -r '(.extra_npm_packages // []) | join(" ")' "$OPTIONS_FILE")"
 extra_apt="$(jq -r '(.extra_apt_packages // []) | join(" ")' "$OPTIONS_FILE")"
 auto_update_agents="$(opt_json '.auto_update_agents' 'false')"
 services_json="$(jq -c '(.services // []) | map(select(type == "string"))' "$OPTIONS_FILE")"
+shims_json="$(jq -c '(.shims // []) | map(select(type == "object"))' "$OPTIONS_FILE")"
 init_commands_json="$(jq -c '(.init_commands // []) | map(select(type == "string"))' "$OPTIONS_FILE")"
 print_pairing_link="$(opt_json '.print_pairing_link' 'true')"
 
@@ -277,6 +278,10 @@ while IFS= read -r cmd; do
     gosu "${PASEO_UID}:${PASEO_GID}" bash -lc "$cmd" 2>&1 | sed "s/^/[init] /" \
         || warn "init command failed (continuing): ${cmd}"
 done < <(jq -r '.[]?' <<<"$init_commands_json")
+
+# Shims first: a service may itself invoke a shimmed command.
+SHIMS_JSON="$shims_json" /usr/local/bin/ha-paseo-shims \
+    || warn "failed to install shims"
 
 SERVICES_JSON="$services_json" \
 gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-services || \

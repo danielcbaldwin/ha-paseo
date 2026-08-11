@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1-7
+
+- **`shims`** — intercept a command name (typically `claude`) with a wrapper,
+  for every caller: agents spawned by the daemon and terminal panes alike. This
+  is what `teamclaude alias --install` cannot do, since shell aliases are not
+  inherited across `execve`. Generated into `/run/ha-paseo/shims`, first on
+  `PATH`, rebuilt each start; nothing is written to `/share` or `/data`.
+  - the shim directory is stripped from `PATH` before the wrapper runs, so a
+    wrapper invoking the same command finds the real binary instead of
+    recursing
+  - `$REAL` gives the absolute path of the shadowed command
+  - `passthrough` lets probe-style arguments (`--version`, `auth`) skip the
+    wrapper, which matters because Paseo fires those concurrently on every
+    provider-features request
+- `/share/paseo/bin` now takes precedence over `update-agents` overrides, so a
+  user wrapper is never silently shadowed.
+
 ## 0.3.1-6
 
 - **Background services.** Tools that are servers rather than one-shot binaries

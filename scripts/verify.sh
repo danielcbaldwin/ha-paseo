@@ -23,7 +23,7 @@ ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; fail=$((fail + 1)); }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
-cleanup() { docker rm -f "$NAME" "${NAME}-mode" "${NAME}-svc" >/dev/null 2>&1 || true; kill "${STUB_PID:-}" 2>/dev/null || true; rm -f "${ENVDUMP:-}"; }
+cleanup() { docker rm -f "$NAME" "${NAME}-mode" "${NAME}-svc" "${NAME}-shim" >/dev/null 2>&1 || true; kill "${STUB_PID:-}" 2>/dev/null || true; rm -f "${ENVDUMP:-}"; }
 trap cleanup EXIT
 
 check() {  # check <description> <command...>
@@ -159,6 +159,14 @@ check "guide is substantial" \
 # so without the profile.d fix the wrapper and override dirs vanish there.
 check "login shell keeps /share/paseo/bin on PATH" \
     sh -c "docker exec $NAME gosu paseo bash -lc 'echo \$PATH' | grep -q /share/paseo/bin"
+# A wrapper in /share/paseo/bin must beat both the bundled CLIs and any
+# update-agents override, or the documented proxy-shim recipe silently loses.
+check "/share/paseo/bin wins over npm-global and /usr/local" \
+    sh -c "docker exec $NAME gosu paseo bash -lc 'echo \$PATH' | grep -qE '^/run/ha-paseo/shims:/share/paseo/bin:/data/home/.npm-global/bin:'"
+check "shim in /share/paseo/bin shadows the bundled claude" \
+    sh -c "docker exec $NAME sh -c 'mkdir -p /share/paseo/bin && printf \"#!/bin/sh\\necho SHIMMED\\n\" > /share/paseo/bin/claude && chmod +x /share/paseo/bin/claude' \
+           && [ \"\$(docker exec $NAME gosu paseo bash -lc 'claude')\" = SHIMMED ] \
+           && docker exec $NAME rm -f /share/paseo/bin/claude"
 check "login shell keeps npm-global on PATH" \
     sh -c "docker exec $NAME gosu paseo bash -lc 'echo \$PATH' | grep -q /data/home/.npm-global/bin"
 # provider_env must reach the DAEMON, which is what spawns agents and terminal
@@ -284,6 +292,39 @@ cfg9="$(boot_with_options '{"connection_mode":"relay","password":"averylongtestp
 check "password set binds 0.0.0.0 even on relay" \
     sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'listening on 0.0.0.0:6767'"
 docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
+# Shims must intercept for EVERY caller -- a shell alias cannot, which is the
+# whole reason this exists. The recursion guard is the load-bearing part: a
+# `claude` shim whose command resolves `claude` via PATH would re-enter itself.
+step "9b. Shims"
+
+shimdir="${TESTDIR}/shim"
+rm -rf "$shimdir"; mkdir -p "$shimdir"/{data,share}
+cat > "${shimdir}/data/options.json" <<'SHIMEOF'
+{"connection_mode":"local","password":"verifyshimpassword1234",
+ "shims":[{"name":"claude","command":"echo WRAPPED real=$REAL","passthrough":["--version"]},
+          {"name":"../evil","command":"echo nope"}]}
+SHIMEOF
+docker rm -f "${NAME}-shim" >/dev/null 2>&1 || true
+docker run -d --name "${NAME}-shim" \
+    -v "${shimdir}/data:/data" -v "${shimdir}/share:/share" "$IMAGE" >/dev/null
+waited=0
+while ! docker logs "${NAME}-shim" 2>&1 | grep -q "starting daemon on" && (( waited < 60 )); do
+    sleep 2; waited=$((waited + 2))
+done
+
+check "shim intercepts the command" \
+    sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'claude hi' | grep -q WRAPPED"
+check "shim resolves the real binary without recursing" \
+    sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'claude hi' | grep -q 'real=/usr/local/bin/claude'"
+check "passthrough args reach the real binary" \
+    sh -c "docker exec ${NAME}-shim gosu paseo bash -lc 'claude --version' | grep -q 'Claude Code'"
+check "unsafe shim name rejected" \
+    sh -c "docker logs ${NAME}-shim 2>&1 | grep -q 'invalid shim name'"
+check "shims live outside /share and /data" \
+    sh -c "! test -e '${shimdir}/share/paseo/bin/claude' && ! test -e '${shimdir}/data/claude'"
+docker rm -f "${NAME}-shim" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 step "10. init_commands and background services"

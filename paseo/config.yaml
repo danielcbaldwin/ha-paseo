@@ -78,6 +78,7 @@ options:
   extra_apt_packages: []
   init_commands: []
   services: []
+  shims: []
 
 # A trailing `?` marks a field optional. Without it Home Assistant shows the
 # field as required (with a `*`) and will not let the form be saved empty --
@@ -108,3 +109,8 @@ schema:
     - str
   services:
     - str
+  shims:
+    - name: str
+      command: str
+      passthrough:
+        - str?

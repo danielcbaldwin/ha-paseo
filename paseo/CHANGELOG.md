@@ -11,6 +11,11 @@ Initial release. Packages Paseo 0.3.1 as a Home Assistant add-on.
   an add-on release; overrides persist across add-on updates and
   `update-agents status` flags when one is shadowing the image version
 - `auto_update_agents` option to do that on every boot (off by default)
+- `agent-login` to show which providers are authenticated and exactly what to
+  run for the ones that are not
+- `provider_env` option for API keys, exported to the daemon and every agent —
+  needed because Gemini CLI has no login subcommand and Codex's browser flow
+  uses a localhost callback that cannot complete from a remote container
 - Weekly `check-updates` workflow that files an issue when any pin falls behind
 - Relay join URL printed to the add-on log at startup (`print_pairing_link`),
   since getting a shell into an add-on is awkward

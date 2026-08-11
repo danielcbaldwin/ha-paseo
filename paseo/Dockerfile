@@ -133,7 +133,8 @@ RUN chmod +x /usr/local/bin/ha-paseo-entrypoint \
              /usr/local/bin/ha-paseo-postboot \
              /usr/local/bin/hass-api \
              /usr/local/bin/ha-inventory \
-             /usr/local/bin/update-agents
+             /usr/local/bin/update-agents \
+             /usr/local/bin/agent-login
 
 LABEL \
     io.hass.name="Paseo" \

@@ -67,6 +67,7 @@ options:
   expose_ha_config: true
   ha_mcp_url: http://supervisor/core/mcp_server/sse
   provider_overrides: "{}"
+  provider_env: "{}"
   auto_update_agents: false
   print_pairing_link: true
   extra_npm_packages: []
@@ -82,6 +83,7 @@ schema:
   expose_ha_config: bool
   ha_mcp_url: str
   provider_overrides: str
+  provider_env: password
   auto_update_agents: bool
   print_pairing_link: bool
   extra_npm_packages:

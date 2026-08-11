@@ -27,6 +27,8 @@ Full documentation: [`paseo/DOCS.md`](paseo/DOCS.md).
 - `/homeassistant` mapped read/write and registered as a workspace
 - `hass-api`, an authenticated wrapper over the Core REST API
 - `ha-inventory`, live discovery of your entities, services and areas
+- `agent-login`, which tells you which providers are authenticated and exactly
+  what to run for the ones that aren't
 - All credentials and state persisted across add-on updates
 
 ### The agents actually know Home Assistant

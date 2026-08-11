@@ -63,6 +63,16 @@ extra_apt="$(jq -r '(.extra_apt_packages // []) | join(" ")' "$OPTIONS_FILE")"
 auto_update_agents="$(opt_json '.auto_update_agents' 'false')"
 print_pairing_link="$(opt_json '.print_pairing_link' 'true')"
 
+# API keys for providers whose login flow does not work well headless -- Gemini
+# has no CLI login command at all. Same string-or-object handling as
+# provider_overrides.
+provider_env="$(jq -c '
+    (.provider_env // {}) as $p
+    | if ($p | type) == "string"
+      then (($p | fromjson?) // {})
+      else $p end
+' "$OPTIONS_FILE")"
+
 # An explicit -e PASEO_PASSWORD wins, so the image can be exercised locally
 # without writing an options file.
 if [[ -n "${PASEO_PASSWORD:-}" ]]; then
@@ -79,6 +89,22 @@ fi
 
 export PASEO_PASSWORD="$password"
 export PASEO_LOG_LEVEL="$log_level"
+
+# Exported here so the daemon and every agent it spawns inherit them. Key names
+# are validated -- an options file is not a place to accept arbitrary shell.
+# Values are never logged.
+while IFS= read -r kv; do
+    if [[ -z "$kv" ]]; then
+        continue
+    fi
+    key="${kv%%=*}"
+    if [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        export "${key}=${kv#*=}"
+        log "exported provider_env ${key}"
+    else
+        warn "ignoring provider_env entry with an invalid name: ${key}"
+    fi
+done < <(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$provider_env")
 if [[ -n "$hostnames" ]]; then
     export PASEO_HOSTNAMES="$hostnames"
 fi

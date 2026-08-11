@@ -78,9 +78,66 @@ off, the log tells you how to connect directly instead.
 
 ### Logging the agents in
 
-Open a terminal pane inside a Paseo workspace and run `claude`, `codex` or
-`opencode` once to complete each OAuth flow. Credentials land under
-`/data/home/` and survive restarts *and* add-on updates.
+Open a **terminal pane inside a Paseo workspace** — that is the shell you get in
+this add-on, and it is all you need. Then run:
+
+```bash
+agent-login     # who is logged in, and exactly what to type for who isn't
+```
+
+Credentials land under `/data/home/` and survive restarts *and* add-on updates,
+so each of these is a one-time job.
+
+| Provider | Command | Works headless? |
+| --- | --- | --- |
+| **Claude Code** | `claude`, then `/login` and paste the code back. Or `claude setup-token` for a long-lived token (needs a subscription) | Yes |
+| **OpenCode** | `opencode auth login` — interactive provider picker | Yes |
+| **Copilot** | `copilot login` — device-code flow | Yes |
+| **Codex** | `codex login` | **No** — see below |
+| **Gemini** | no login subcommand exists | **No** — see below |
+
+#### The two that need help
+
+**Codex** uses a browser flow with a callback to `localhost:1455`. Your browser
+resolves `localhost` to *your laptop*, not the Home Assistant box, so it cannot
+complete from a remote container. Either tunnel it:
+
+```bash
+ssh -L 1455:localhost:1455 you@ha-host     # then run `codex login` in the pane
+```
+
+or skip the browser entirely:
+
+```bash
+printenv OPENAI_API_KEY | codex login --with-api-key
+codex login status
+```
+
+**Gemini CLI has no login subcommand at all.** Auth is either the interactive
+"Login with Google" picker in its TUI — same localhost-callback problem — or an
+API key. In practice, use the API key.
+
+#### API keys, no interactive flow
+
+Set the `provider_env` option to a JSON object and restart:
+
+```yaml
+provider_env: >-
+  {"GEMINI_API_KEY": "...", "OPENAI_API_KEY": "...", "ANTHROPIC_API_KEY": "..."}
+```
+
+These are exported to the daemon and inherited by every agent and terminal pane
+it spawns. Key names are validated; anything that is not a valid shell
+identifier is logged and skipped rather than executed.
+
+One wrinkle if you go poking around from the host: a shell obtained with
+`docker exec` will **not** see them. `docker exec` starts from the image
+environment, not from the running entrypoint's exports. Use a terminal pane in
+the Paseo UI, which is a child of the daemon and inherits them properly.
+
+The field is masked in the UI, but add-on options are stored **in plaintext** in
+`/data/options.json` and are captured in backups. Where an interactive login
+works, prefer it — it keeps a key off disk entirely.
 
 ---
 
@@ -96,6 +153,7 @@ Open a terminal pane inside a Paseo workspace and run `claude`, `codex` or
 | `expose_ha_config` | `true` | Register `/homeassistant` as a workspace and write agent config into it. |
 | `ha_mcp_url` | `http://supervisor/core/mcp_server/sse` | Requires the **MCP Server** integration in Home Assistant. |
 | `provider_overrides` | `"{}"` | JSON string merged into `agents.providers`. See below. |
+| `provider_env` | `"{}"` | JSON string of env vars exported to the daemon and its agents — API keys for providers whose login flow will not work headless. Masked in the UI, plaintext on disk. |
 | `auto_update_agents` | `false` | Update every agent CLI to latest on each boot. Slow, network-dependent, not reproducible. |
 | `print_pairing_link` | `true` | Print the relay join URL to the add-on log at startup (only when `relay_enabled`). |
 | `extra_npm_packages` | `[]` | Installed into the persistent `/data/home/.npm-global` at each boot. |
@@ -344,6 +402,8 @@ enforced by the build. To move to a new Paseo release:
 | `403 Host not allowed` | Add the DNS name you are using to `hostnames`. |
 | Web UI loads but will not connect | The static UI is served without auth; the API is not. Add a direct connection with the password. |
 | A provider is missing from the app | Its CLI is not installed or not on `PATH`. Check `extra_npm_packages`, or `/share/paseo/bin` for wrappers. |
+| A provider is there but every request fails | Not logged in. Run `agent-login` in a terminal pane. |
+| `codex login` opens a browser that never completes | Its callback is `localhost:1455`, which is your laptop, not the HA box. Tunnel it or use `--with-api-key`. |
 | An add-on update did not change my Claude Code version | An `update-agents` override in `/data` is shadowing the image copy. Run `update-agents status`, then `update-agents reset`. |
 | A wrapper in `/share/paseo/bin` is not found in a terminal | Should not happen — `/etc/profile.d/ha-paseo-path.sh` restores `PATH` in login shells. Check the file survived, and that the script is executable. |
 | MCP server shows as failed | The **MCP Server** integration is not enabled in Home Assistant. `hass-api` works regardless. |

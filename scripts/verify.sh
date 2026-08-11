@@ -23,7 +23,7 @@ ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; fail=$((fail + 1)); }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -f "${ENVDUMP:-}"; }
 trap cleanup EXIT
 
 check() {  # check <description> <command...>
@@ -35,7 +35,11 @@ in_container() { docker exec "$NAME" "$@"; }
 
 start_container() {
     cleanup
+    # SYS_PTRACE is for the harness only, not the product: without it even root
+    # cannot read /proc/<pid>/environ of the uid-1000 daemon, so the
+    # provider_env propagation check cannot observe anything.
     docker run -d --name "$NAME" \
+        --cap-add=SYS_PTRACE \
         -p "${PORT}:6767" \
         -v "${TESTDIR}/data:/data" \
         -v "${TESTDIR}/share:/share" \
@@ -76,6 +80,7 @@ cat > "${TESTDIR}/data/options.json" <<'EOF'
   "expose_ha_config": true,
   "ha_mcp_url": "http://supervisor/core/mcp_server/sse",
   "provider_overrides": "{\"claude\":{\"label\":\"Claude (verify)\"}}",
+  "provider_env": "{\"GEMINI_API_KEY\":\"verify-gemini-key\",\"bad name\":\"nope\"}",
   "extra_npm_packages": [],
   "extra_apt_packages": []
 }
@@ -154,6 +159,25 @@ check "login shell keeps /share/paseo/bin on PATH" \
     sh -c "docker exec $NAME gosu paseo bash -lc 'echo \$PATH' | grep -q /share/paseo/bin"
 check "login shell keeps npm-global on PATH" \
     sh -c "docker exec $NAME gosu paseo bash -lc 'echo \$PATH' | grep -q /data/home/.npm-global/bin"
+# provider_env must reach the DAEMON, which is what spawns agents and terminal
+# panes. Not PID 1 (that is tini, whose env was fixed at container start), and
+# not `docker exec` (that gets the image env, not the entrypoint's exports).
+# The daemon renames its processes ("Paseo Daemon"), so scan every pid and dump
+# once to a file rather than re-running it inside each check's subshell.
+ENVDUMP="$(mktemp)"
+docker exec -u 0 "$NAME" sh -c \
+    'for p in /proc/[0-9]*; do tr "\0" "\n" < $p/environ 2>/dev/null; done' \
+    > "$ENVDUMP" 2>/dev/null || true
+
+check "provider_env reaches the daemon" \
+    grep -qx "GEMINI_API_KEY=verify-gemini-key" "$ENVDUMP"
+check "invalid provider_env name rejected" \
+    sh -c "docker logs $NAME 2>&1 | grep -q 'invalid name'"
+check "invalid provider_env value never exported" \
+    sh -c "! grep -q nope '$ENVDUMP'"
+check "agent-login detects an API key" \
+    sh -c "docker exec -e GEMINI_API_KEY=k $NAME gosu paseo agent-login | grep -q 'gemini.*logged in'"
+
 check "update-agents status runs" \
     sh -c "docker exec $NAME gosu paseo update-agents status | grep -q gemini"
 

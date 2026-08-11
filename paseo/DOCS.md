@@ -521,9 +521,19 @@ enforced by the build. To move to a new Paseo release:
 2. Update both `build_from` lines and the digest comment in `build.yaml`.
 3. Add a `CHANGELOG.md` entry, push, then tag `v0.3.2-1`.
 
+Use the release script, which enforces the ordering below:
+
+```bash
+./scripts/release.sh 0.3.2-1
+```
+
 **Do not edit `version` in `config.yaml` by hand.** The tag is the source of
 truth; CI writes the version into the image it builds and then commits the bump
 to `main` itself, but only once both architectures have published.
+
+Because CI pushes to `main`, a local checkout goes stale after every release.
+Tagging from a stale base puts the tag on divergent history — the script
+refuses, rebasing first and checking the tag is reachable from `origin/main`.
 
 That ordering matters. Supervisor reads `config.yaml` from the default branch
 and pulls `<image>:<that version>`. Bumping it before the images exist makes
@@ -531,7 +541,7 @@ every instance offer an update that fails with `[404] manifest unknown` — whic
 is exactly what happened releasing `0.3.1-2`. Releasing is now just:
 
 ```bash
-git tag -a v0.3.2-1 -m "..." && git push origin v0.3.2-1
+./scripts/release.sh 0.3.2-1
 ```
 
 ---

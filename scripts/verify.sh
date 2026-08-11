@@ -249,82 +249,41 @@ check "credential dir survived restart" \
 check "config.json survived restart" \
     in_container test -f /data/home/.paseo/config.json
 
+# The registration check matched a `path` key that does not exist on workspace
+# entries (they use `cwd`), so a duplicate /homeassistant workspace was created
+# on every restart. This container has now started twice.
+ws_count="$(docker exec -e PASEO_PASSWORD=verify-secret "$NAME" gosu paseo sh -lc \
+    'paseo workspace ls --json 2>/dev/null | jq "[.[]? | select(.cwd==\"/homeassistant\")] | length"' \
+    2>/dev/null || echo "?")"
+check "exactly one /homeassistant workspace after a restart" \
+    sh -c "[ '$ws_count' = '1' ]"
+
 # ---------------------------------------------------------------------------
-step "9. Password is generated when none is configured"
+step "9. Password is optional; the bind address follows it"
 
-# Previously this refused to boot. Refusing is bad UX for something that can be
-# solved safely: generate a strong one and print it. Running UNauthenticated is
-# still not an option -- 6767 is published and the daemon holds a Supervisor
-# manager token.
-pwdir="${TESTDIR}/mode"
-cfg9="$(boot_with_options '{"connection_mode":"local"}')"
-
+# No auto-generation. The password only guards a network-exposed listener, so
+# without one the relay modes must bind loopback rather than sitting open.
+cfg9="$(boot_with_options '{"connection_mode":"relay"}')"
 check "starts with no password configured" \
     sh -c "jq -e '.version == 1' <<<'$cfg9'"
-check "generated password is logged" \
-    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'Generated Paseo password'"
-check "generated password is persisted" \
-    test -s "${pwdir}/data/.paseo-generated-password"
-check "generated password is long enough" \
-    sh -c "[ \"\$(wc -c < '${pwdir}/data/.paseo-generated-password')\" -ge 20 ]"
-check "generated password file is not world readable" \
-    sh -c "[ \"\$(stat -c %a '${pwdir}/data/.paseo-generated-password')\" = 600 ]"
+check "nothing is auto-generated" \
+    sh -c "! docker logs ${NAME}-mode 2>&1 | grep -qi 'generated'"
+check "no password file is created" \
+    sh -c "! test -e '${TESTDIR}/mode/data/.paseo-generated-password'"
+check "relay + no password binds loopback" \
+    sh -c "docker exec ${NAME}-mode sh -c 'tr \"\\0\" \"\\n\" < /proc/1/environ' | grep -q '^PASEO_LISTEN=127.0.0.1:6767$' \
+           || docker logs ${NAME}-mode 2>&1 | grep -q 'binding 127.0.0.1'"
 
-# Restart against the same /data: it must reuse, not roll a new password on
-# every boot (which would silently break every saved client).
-pw_before="$(cat "${pwdir}/data/.paseo-generated-password")"
+cfg9="$(boot_with_options '{"connection_mode":"local"}')"
+check "local + no password still starts" \
+    sh -c "jq -e '.version == 1' <<<'$cfg9'"
+check "local + no password warns loudly" \
+    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'NO PASSWORD SET'"
+
+cfg9="$(boot_with_options '{"connection_mode":"relay","password":"averylongtestpassword123"}')"
+check "password set binds 0.0.0.0 even on relay" \
+    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'listening on 0.0.0.0:6767'"
 docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
-docker run -d --name "${NAME}-mode" \
-    -v "${pwdir}/data:/data" -v "${pwdir}/share:/share" "$IMAGE" >/dev/null
-waited=0
-while ! docker logs "${NAME}-mode" 2>&1 | grep -q "connection mode:" && (( waited < 40 )); do
-    sleep 2; waited=$((waited + 2))
-done
-check "generated password is reused across restarts" \
-    sh -c "[ \"\$(cat '${pwdir}/data/.paseo-generated-password')\" = '$pw_before' ]"
-check "reuse is reported, not silently regenerated" \
-    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'reusing the one in'"
-docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
-
-# ---------------------------------------------------------------------------
-# The generated password is written back into the add-on's own options so it is
-# visible in the Configuration tab. Supervisor REPLACES options rather than
-# merging, so the add-on must send the full set back -- a partial write would
-# wipe every other setting. That is the assertion that matters here.
-step "10. Generated password is written back to the add-on options"
-
-STUB_PORT=17654
-STUB_CAPTURE="$(mktemp)"
-python3 "${ROOT}/scripts/supervisor-stub.py" "$STUB_PORT" "$STUB_CAPTURE" &
-STUB_PID=$!
-sleep 1
-
-pwdir2="${TESTDIR}/optwrite"
-rm -rf "$pwdir2"; mkdir -p "$pwdir2"/{data,share}
-echo '{"connection_mode":"local"}' > "${pwdir2}/data/options.json"
-docker rm -f "${NAME}-opt" >/dev/null 2>&1 || true
-docker run -d --name "${NAME}-opt" \
-    --add-host=supervisor-stub:host-gateway \
-    -e SUPERVISOR_TOKEN=stub-token \
-    -e "SUPERVISOR_API_BASE=http://supervisor-stub:${STUB_PORT}" \
-    -v "${pwdir2}/data:/data" -v "${pwdir2}/share:/share" "$IMAGE" >/dev/null
-waited=0
-while [[ ! -s "$STUB_CAPTURE" ]] && (( waited < 60 )); do sleep 2; waited=$((waited + 2)); done
-
-check "options write was attempted"        test -s "$STUB_CAPTURE"
-check "password included in the write"     sh -c "jq -e '.options.password | length >= 20' '$STUB_CAPTURE'"
-check "existing options preserved (log_level)" \
-    sh -c "jq -e '.options.log_level == \"info\"' '$STUB_CAPTURE'"
-check "existing options preserved (workspace_root)" \
-    sh -c "jq -e '.options.workspace_root == \"/share/paseo/workspace\"' '$STUB_CAPTURE'"
-check "log points at the Configuration tab" \
-    sh -c "docker logs ${NAME}-opt 2>&1 | grep -q \"written into the\""
-check "no stale on-disk copy left behind" \
-    sh -c "! test -f '${pwdir2}/data/.paseo-generated-password'"
-
-kill "$STUB_PID" 2>/dev/null || true
-rm -f "$STUB_CAPTURE"
-docker rm -f "${NAME}-opt" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$pass" "$fail"

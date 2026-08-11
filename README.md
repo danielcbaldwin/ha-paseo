@@ -26,19 +26,13 @@ Or by hand:
 Install **Paseo** and press **Start**. Every option has a working default, so
 there is nothing you must fill in first.
 
-Watch the **Log** tab. If you left `password` blank, one is generated for you
-and printed there in a banner — copy it, you'll need it to connect:
+**The `password` field is optional.** With the default `relay` connection mode
+it is not used at all — the relay authenticates your device through the pairing
+handshake instead. Set one only if you want to connect **directly** over your
+LAN or a VPN, or want the **Open Web UI** button to work; without a password the
+daemon binds loopback and the relay is the only way in.
 
-```
-============== Generated Paseo password ==============
-  Df1pd0sMOIIB06Zi47xsa8Bh4Ekn
-======================================================
-```
-
-It's also written back into the `password` field itself, so you can read it any
-time from the Configuration tab rather than hunting through logs. Type your own
-to change it, or **clear the field and restart to regenerate**. Add any DNS name
-you plan to use to `hostnames` (IPs always work without it).
+Add any DNS name you plan to use to `hostnames` (IPs always work without it).
 
 ### 3. Connect a client
 

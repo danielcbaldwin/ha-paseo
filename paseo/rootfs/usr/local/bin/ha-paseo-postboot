@@ -181,8 +181,21 @@ print_pairing() {
 }
 
 register_workspace() {
-    if paseo workspace ls --json 2>/dev/null | jq -e \
-        --arg p "$HA_DIR" 'any(.[]?; .path == $p)' >/dev/null 2>&1; then
+    local list
+
+    # Fail safe: if the list cannot be read, do NOT register. An extra
+    # workspace on every restart is far worse than none, and the user can
+    # always add it from the app.
+    if ! list="$(paseo workspace ls --json 2>/dev/null)" \
+       || ! jq -e 'type == "array"' <<<"$list" >/dev/null 2>&1; then
+        warn "could not list workspaces; skipping registration of ${HA_DIR}"
+        return 0
+    fi
+
+    # Entries expose the directory as `cwd`. There is no `path` key -- matching
+    # one meant this test never hit, so a duplicate "Home Assistant" workspace
+    # was created on every single restart.
+    if jq -e --arg p "$HA_DIR" 'any(.[]?; .cwd == $p)' <<<"$list" >/dev/null 2>&1; then
         log "workspace for ${HA_DIR} already registered"
         return 0
     fi

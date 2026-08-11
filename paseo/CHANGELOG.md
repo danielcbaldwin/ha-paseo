@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1-5
+
+- **Fixed: a duplicate "Home Assistant" workspace was created on every restart.**
+  The "already registered?" check matched a `path` key that does not exist on
+  Paseo workspace entries — they use `cwd` — so it never matched. It now matches
+  `cwd`, and skips registration entirely if the workspace list cannot be read,
+  rather than creating another one. Archive any duplicates with
+  `paseo workspace archive <id>`.
+- **The password is optional again, and nothing is auto-generated.** It only
+  affects direct connections; the relay authenticates devices through its
+  pairing handshake instead. The bind address now follows from it:
+  - password set → `0.0.0.0` (protected; Open Web UI and LAN access work)
+  - blank + `relay`/`custom_relay` → `127.0.0.1` (relay only, nothing exposed)
+  - blank + `local` → `0.0.0.0`, unauthenticated, with a loud log warning
+- Removed the generated-password write-back added in `0.3.1-4`, along with
+  `/data/.paseo-generated-password`.
+
 ## 0.3.1-4
 
 - **The generated password is now written back into the `password` option**, so

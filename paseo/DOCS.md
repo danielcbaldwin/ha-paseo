@@ -22,9 +22,8 @@ configuration.
 ## Setup
 
 1. Install the add-on and open **Configuration**.
-2. Leave **password** blank. One is generated on first start and written into
-   the field itself, so you can read it from the Configuration tab afterwards.
-   Set your own if you prefer. See "Authentication" below.
+2. Leave **password** blank unless you want direct/LAN access — with the
+   default `relay` mode it is not needed. See "Authentication" below.
 3. Add any hostname you will reach it by to **hostnames** (Paseo returns
    `403 Host not allowed` for names that are not on the list). IP addresses and
    `localhost` always work without an entry. The defaults cover `*.lan` and
@@ -72,32 +71,34 @@ If you also self-host the Paseo web app, set `app_base_url` to its origin
 
 ### Authentication
 
-The daemon always requires a password, but you never have to invent one.
+**The password is optional, and only does anything for direct connections.**
 
-**Leave `password` blank and start the add-on.** A 28-character password is
-generated and **written back into the `password` option itself**, so it appears
-in the Configuration tab exactly as if you had typed it. It is also printed to
-the log on the start that created it.
+Paseo's own guidance is that password auth "is primarily useful for direct LAN
+or VPN connections". The relay does not use it: the daemon holds a persistent
+ECDH keypair and refuses commands until the pairing handshake completes, so
+*the pairing link is the credential* there. That is why a desktop Paseo install
+usually has no password — it binds `127.0.0.1` and is reached over the relay.
 
-| You want to | Do this |
-| --- | --- |
-| Find out what it is | Look at the `password` field in the Configuration tab (click the eye icon to reveal), or the add-on Log |
-| Change it | Type your own into the field and restart |
-| **Regenerate it** | **Clear the field and restart** — a fresh one is generated and written back |
+So the bind address follows from whether you set one:
 
-The write-back reads the current options and sends the complete set back,
-because Supervisor replaces an add-on's options rather than merging them; a
-partial write would discard everything else you had configured.
+| `password` | `connection_mode` | Binds | Result |
+| --- | --- | --- | --- |
+| set | any | `0.0.0.0:6767` | Protected. Direct connections, LAN browser and **Open Web UI** all work. |
+| empty | `relay` / `custom_relay` | `127.0.0.1:6767` | Relay only. Nothing is exposed, so nothing needs guarding. **Open Web UI and LAN browser access do not work.** |
+| empty | `local` | `0.0.0.0:6767` | **Exposed with no authentication.** Allowed, but warned about loudly in the log. |
 
-If Supervisor cannot be reached, the add-on falls back to storing the password
-in `/data/.paseo-generated-password` (mode 600) and says so in the log. In that
-case, delete that file and restart to regenerate.
+Nothing is auto-generated, and no password is stored on disk by the add-on.
 
-There is no unauthenticated mode. A typical desktop Paseo install binds
-`127.0.0.1` and is unreachable from the network, which is why you may never have
-set a password there. This add-on is not that: it publishes 6767 on your LAN,
-and the daemon holds a Supervisor token with `manager` rights — anyone who
-reached the port could rewrite your automations or remove add-ons.
+> **Home Assistant cannot hide an option based on another option's value** — its
+> add-on schema has no conditional fields. So `password` is always visible in
+> the Configuration tab even though it only matters for `local`. Leave it blank
+> unless you are using `local` (or want the web UI).
+
+That last row is the one to think about: `local` with no password means anyone
+who can reach port 6767 controls a daemon holding a Supervisor token with
+`manager` rights — enough to rewrite automations or remove add-ons. The add-on
+will still start, because you asked for the password to be optional, but it says
+so in the log every time.
 
 The password is hashed in memory at startup and is **not** written into
 `config.json`.
@@ -205,7 +206,7 @@ works, prefer it — it keeps a key off disk entirely.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `password` | *(empty)* | Leave blank and one is generated on first start and written into this field. Clear it and restart to regenerate. |
+| `password` | *(empty)* | Optional. Only used for direct connections — see Authentication. Leaving it blank makes relay modes bind loopback. |
 | `hostnames` | `homeassistant.local`, `.lan` | DNS names allowed to reach the daemon. Add any other name you use; IPs always work. |
 | `log_level` | `info` | `trace`, `debug`, `info`, `warn`, `error`. |
 | `connection_mode` | `relay` | `relay`, `local`, or `custom_relay`. See above. |
@@ -475,7 +476,7 @@ git tag -a v0.3.2-1 -m "..." && git push origin v0.3.2-1
 
 | Symptom | Cause |
 | --- | --- |
-| Clients are rejected and you never set a password | One was generated — read it from the `password` field in the Configuration tab. |
+| Open Web UI does nothing / LAN browser cannot connect | No password set, so relay modes bind loopback. Set a password, or use `connection_mode: local`. |
 | `403 Host not allowed` | Add the DNS name you are using to `hostnames`. |
 | Web UI loads but will not connect | The static UI is served without auth; the API is not. Add a direct connection with the password. |
 | A provider is missing from the app | Its CLI is not installed or not on `PATH`. Check `extra_npm_packages`, or `/share/paseo/bin` for wrappers. |

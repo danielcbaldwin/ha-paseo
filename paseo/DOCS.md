@@ -22,9 +22,9 @@ configuration.
 ## Setup
 
 1. Install the add-on and open **Configuration**.
-2. Optionally set a **password**. Leave it blank and one is generated for you
-   on first start and printed to the add-on log — you never have to invent one.
-   See "Authentication" below.
+2. Leave **password** blank. One is generated on first start and written into
+   the field itself, so you can read it from the Configuration tab afterwards.
+   Set your own if you prefer. See "Authentication" below.
 3. Add any hostname you will reach it by to **hostnames** (Paseo returns
    `403 Host not allowed` for names that are not on the list). IP addresses and
    `localhost` always work without an entry. The defaults cover `*.lan` and
@@ -72,23 +72,35 @@ If you also self-host the Paseo web app, set `app_base_url` to its origin
 
 ### Authentication
 
-The daemon requires a password. You do not have to choose one:
+The daemon always requires a password, but you never have to invent one.
 
-- **Leave `password` blank** — a 28-character random password is generated on
-  first start, printed to the add-on log in a banner, and saved to
-  `/data/.paseo-generated-password` (mode 600). It is reused on every restart,
-  so saved clients keep working. Lost it? Read it from the log or that file.
-- **Set `password`** — yours wins, and the generated one is ignored.
+**Leave `password` blank and start the add-on.** A 28-character password is
+generated and **written back into the `password` option itself**, so it appears
+in the Configuration tab exactly as if you had typed it. It is also printed to
+the log on the start that created it.
+
+| You want to | Do this |
+| --- | --- |
+| Find out what it is | Look at the `password` field in the Configuration tab (click the eye icon to reveal), or the add-on Log |
+| Change it | Type your own into the field and restart |
+| **Regenerate it** | **Clear the field and restart** — a fresh one is generated and written back |
+
+The write-back reads the current options and sends the complete set back,
+because Supervisor replaces an add-on's options rather than merging them; a
+partial write would discard everything else you had configured.
+
+If Supervisor cannot be reached, the add-on falls back to storing the password
+in `/data/.paseo-generated-password` (mode 600) and says so in the log. In that
+case, delete that file and restart to regenerate.
 
 There is no unauthenticated mode. A typical desktop Paseo install binds
 `127.0.0.1` and is unreachable from the network, which is why you may never have
 set a password there. This add-on is not that: it publishes 6767 on your LAN,
 and the daemon holds a Supervisor token with `manager` rights — anyone who
-reached the port could rewrite your automations or remove add-ons. Generating a
-password keeps setup effortless without that trade.
+reached the port could rewrite your automations or remove add-ons.
 
 The password is hashed in memory at startup and is **not** written into
-`config.json`, so changing it is just an edit and a restart.
+`config.json`.
 
 ### Getting the join / pairing URL
 
@@ -193,7 +205,7 @@ works, prefer it — it keeps a key off disk entirely.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `password` | *(empty)* | Leave blank to have one generated on first start and printed to the log. Masked in the UI. Hashed by the daemon at startup. |
+| `password` | *(empty)* | Leave blank and one is generated on first start and written into this field. Clear it and restart to regenerate. |
 | `hostnames` | `homeassistant.local`, `.lan` | DNS names allowed to reach the daemon. Add any other name you use; IPs always work. |
 | `log_level` | `info` | `trace`, `debug`, `info`, `warn`, `error`. |
 | `connection_mode` | `relay` | `relay`, `local`, or `custom_relay`. See above. |
@@ -463,7 +475,7 @@ git tag -a v0.3.2-1 -m "..." && git push origin v0.3.2-1
 
 | Symptom | Cause |
 | --- | --- |
-| Clients are rejected and you never set a password | One was generated. Find it in the add-on **Log**, or in `/data/.paseo-generated-password`. |
+| Clients are rejected and you never set a password | One was generated — read it from the `password` field in the Configuration tab. |
 | `403 Host not allowed` | Add the DNS name you are using to `hostnames`. |
 | Web UI loads but will not connect | The static UI is served without auth; the API is not. Add a direct connection with the password. |
 | A provider is missing from the app | Its CLI is not installed or not on `PATH`. Check `extra_npm_packages`, or `/share/paseo/bin` for wrappers. |

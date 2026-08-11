@@ -99,19 +99,62 @@ fi
 # that trade.
 GENERATED_PASSWORD_FILE=/data/.paseo-generated-password
 
+# Write the generated password back into the add-on's own options, so it shows
+# up in the Configuration tab like any password you had set yourself. Without
+# this the only copy is a log line, and there is no way to look it up later
+# short of a shell -- which you cannot get without first connecting, which
+# needs the password.
+persist_password_to_options() { # persist_password_to_options <password>
+    local pw="$1" base="${SUPERVISOR_API_BASE:-http://supervisor}" current body
+    [[ -n "${SUPERVISOR_TOKEN:-}" ]] || return 1
+
+    current="$(curl -fsS --max-time 10 \
+        -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        "${base}/addons/self/info" 2>/dev/null | jq -c '.data.options // empty')" || return 1
+    [[ -n "$current" ]] || return 1
+
+    # Read-merge-write, sending the FULL option set back. Supervisor replaces
+    # options wholesale, so posting just {"password": ...} would silently wipe
+    # every other setting.
+    body="$(jq -c --arg p "$pw" '{options: (. + {password: $p})}' <<<"$current")" || return 1
+
+    curl -fsS --max-time 10 -X POST \
+        -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "$body" "${base}/addons/self/options" >/dev/null 2>&1
+}
+
 if [[ -z "$password" ]]; then
-    if [[ -s "$GENERATED_PASSWORD_FILE" ]]; then
+    # 28 alphanumerics. dd/base64/cut avoids the SIGPIPE that `head -c` on
+    # /dev/urandom would trigger under pipefail.
+    generated="$(dd if=/dev/urandom bs=32 count=1 2>/dev/null \
+                 | base64 | tr -dc 'A-Za-z0-9' | cut -c1-28)"
+    if [[ "${#generated}" -lt 20 ]]; then
+        fatal "could not generate a password; set one in the Configuration tab"
+    fi
+
+    if persist_password_to_options "$generated"; then
+        password="$generated"
+        # The options field is now the single source of truth; drop any older
+        # on-disk copy so the two cannot disagree.
+        rm -f "$GENERATED_PASSWORD_FILE" 2>/dev/null || true
+        log ""
+        log "============== Generated Paseo password =============="
+        log "  ${password}"
+        log ""
+        log "  No password was set, so one was generated and written into the"
+        log "  add-on's 'password' option -- you can see it in the"
+        log "  Configuration tab. To change it, edit it there. To get a fresh"
+        log "  one, clear the field and restart."
+        log "======================================================"
+        log ""
+    elif [[ -s "$GENERATED_PASSWORD_FILE" ]]; then
+        # Supervisor unreachable: keep using the password already generated
+        # rather than handing out a new one on every restart.
         password="$(cat "$GENERATED_PASSWORD_FILE")"
-        log "no password configured; reusing the generated one"
-        log "  (shown on first start, and stored in ${GENERATED_PASSWORD_FILE})"
+        log "no password configured; reusing the one in ${GENERATED_PASSWORD_FILE}"
     else
-        # 28 alphanumerics. dd/base64/cut avoids the SIGPIPE that `head -c`
-        # on /dev/urandom would trigger under pipefail.
-        password="$(dd if=/dev/urandom bs=32 count=1 2>/dev/null \
-                    | base64 | tr -dc 'A-Za-z0-9' | cut -c1-28)"
-        if [[ "${#password}" -lt 20 ]]; then
-            fatal "could not generate a password; set one in the Configuration tab"
-        fi
+        password="$generated"
         if (umask 077; printf '%s' "$password" > "$GENERATED_PASSWORD_FILE") 2>/dev/null; then
             chown "${PASEO_UID}:${PASEO_GID}" "$GENERATED_PASSWORD_FILE" 2>/dev/null || true
         else
@@ -122,10 +165,9 @@ if [[ -z "$password" ]]; then
         log "============== Generated Paseo password =============="
         log "  ${password}"
         log ""
-        log "  No password was set, so this one was generated for you and"
-        log "  saved to ${GENERATED_PASSWORD_FILE}. Use it when adding this"
-        log "  host in the Paseo app. To choose your own, set the 'password'"
-        log "  option in the Configuration tab and restart."
+        log "  Could not write it into the add-on options, so it is stored in"
+        log "  ${GENERATED_PASSWORD_FILE} instead. Delete that file and"
+        log "  restart to get a fresh one, or set 'password' yourself."
         log "======================================================"
         log ""
     fi

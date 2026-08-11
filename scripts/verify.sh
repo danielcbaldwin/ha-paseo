@@ -23,7 +23,7 @@ ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; fail=$((fail + 1)); }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
-cleanup() { docker rm -f "$NAME" "${NAME}-mode" >/dev/null 2>&1 || true; rm -f "${ENVDUMP:-}"; }
+cleanup() { docker rm -f "$NAME" "${NAME}-mode" "${NAME}-opt" >/dev/null 2>&1 || true; kill "${STUB_PID:-}" 2>/dev/null || true; rm -f "${ENVDUMP:-}"; }
 trap cleanup EXIT
 
 check() {  # check <description> <command...>
@@ -283,8 +283,48 @@ done
 check "generated password is reused across restarts" \
     sh -c "[ \"\$(cat '${pwdir}/data/.paseo-generated-password')\" = '$pw_before' ]"
 check "reuse is reported, not silently regenerated" \
-    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'reusing the generated one'"
+    sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'reusing the one in'"
 docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
+# The generated password is written back into the add-on's own options so it is
+# visible in the Configuration tab. Supervisor REPLACES options rather than
+# merging, so the add-on must send the full set back -- a partial write would
+# wipe every other setting. That is the assertion that matters here.
+step "10. Generated password is written back to the add-on options"
+
+STUB_PORT=17654
+STUB_CAPTURE="$(mktemp)"
+python3 "${ROOT}/scripts/supervisor-stub.py" "$STUB_PORT" "$STUB_CAPTURE" &
+STUB_PID=$!
+sleep 1
+
+pwdir2="${TESTDIR}/optwrite"
+rm -rf "$pwdir2"; mkdir -p "$pwdir2"/{data,share}
+echo '{"connection_mode":"local"}' > "${pwdir2}/data/options.json"
+docker rm -f "${NAME}-opt" >/dev/null 2>&1 || true
+docker run -d --name "${NAME}-opt" \
+    --add-host=supervisor-stub:host-gateway \
+    -e SUPERVISOR_TOKEN=stub-token \
+    -e "SUPERVISOR_API_BASE=http://supervisor-stub:${STUB_PORT}" \
+    -v "${pwdir2}/data:/data" -v "${pwdir2}/share:/share" "$IMAGE" >/dev/null
+waited=0
+while [[ ! -s "$STUB_CAPTURE" ]] && (( waited < 60 )); do sleep 2; waited=$((waited + 2)); done
+
+check "options write was attempted"        test -s "$STUB_CAPTURE"
+check "password included in the write"     sh -c "jq -e '.options.password | length >= 20' '$STUB_CAPTURE'"
+check "existing options preserved (log_level)" \
+    sh -c "jq -e '.options.log_level == \"info\"' '$STUB_CAPTURE'"
+check "existing options preserved (workspace_root)" \
+    sh -c "jq -e '.options.workspace_root == \"/share/paseo/workspace\"' '$STUB_CAPTURE'"
+check "log points at the Configuration tab" \
+    sh -c "docker logs ${NAME}-opt 2>&1 | grep -q \"written into the\""
+check "no stale on-disk copy left behind" \
+    sh -c "! test -f '${pwdir2}/data/.paseo-generated-password'"
+
+kill "$STUB_PID" 2>/dev/null || true
+rm -f "$STUB_CAPTURE"
+docker rm -f "${NAME}-opt" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$pass" "$fail"

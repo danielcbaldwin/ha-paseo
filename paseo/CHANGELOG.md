@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1-4
+
+- **The generated password is now written back into the `password` option**, so
+  it is visible in the Configuration tab instead of only in a log line. Reading
+  it previously required a shell, which you could only get through Paseo, which
+  needed the password.
+- **Regenerating is now possible**: clear the field and restart.
+- The write-back reads the current options and sends the full set back.
+  Supervisor replaces options rather than merging, so a partial write would have
+  discarded every other setting — there is a test asserting unrelated options
+  survive it.
+
 ## 0.3.1-3
 
 - **The `password` field is no longer marked required in the UI.** Home

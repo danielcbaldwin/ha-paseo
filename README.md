@@ -35,9 +35,10 @@ and printed there in a banner — copy it, you'll need it to connect:
 ======================================================
 ```
 
-It's saved to `/data/.paseo-generated-password` and reused on every restart. Set
-the `password` option yourself if you'd rather choose one. Add any DNS name you
-plan to use to `hostnames` (IPs always work without it).
+It's also written back into the `password` field itself, so you can read it any
+time from the Configuration tab rather than hunting through logs. Type your own
+to change it, or **clear the field and restart to regenerate**. Add any DNS name
+you plan to use to `hostnames` (IPs always work without it).
 
 ### 3. Connect a client
 

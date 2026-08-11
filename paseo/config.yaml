@@ -77,8 +77,11 @@ options:
   extra_npm_packages: []
   extra_apt_packages: []
 
+# A trailing `?` marks a field optional. Without it Home Assistant shows the
+# field as required (with a `*`) and will not let the form be saved empty --
+# which contradicts the add-on generating a password when none is given.
 schema:
-  password: password
+  password: password?
   hostnames:
     - str
   log_level: list(trace|debug|info|warn|error)
@@ -91,8 +94,8 @@ schema:
   workspace_root: str
   expose_ha_config: bool
   ha_mcp_url: str
-  provider_overrides: str
-  provider_env: password
+  provider_overrides: str?
+  provider_env: password?
   auto_update_agents: bool
   print_pairing_link: bool
   extra_npm_packages:

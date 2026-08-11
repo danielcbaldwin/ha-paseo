@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1-3
+
+- **The `password` field is no longer marked required in the UI.** Home
+  Assistant treats any schema entry without a trailing `?` as mandatory and
+  shows it with a `*`, which contradicted `0.3.1-2` generating a password when
+  none is set. `provider_overrides` and `provider_env` are now optional too.
+- Releases no longer advertise a version before its images exist. The git tag
+  is the source of truth; CI publishes first and only then bumps `config.yaml`
+  on `main`. Updating to `0.3.1-2` briefly failed with
+  `[404] manifest unknown` for this reason.
+
 ## 0.3.1-2
 
 - **The password is now optional.** Leave it blank and a 28-character one is

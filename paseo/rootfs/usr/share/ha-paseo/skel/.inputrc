@@ -1,0 +1,19 @@
+# Seeded by the Paseo add-on; never overwritten. Edit freely.
+$include /etc/inputrc
+
+# Up/Down search history for what you have already typed, rather than walking
+# through every command blindly. The single biggest readline improvement.
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+
+# Ctrl-Left / Ctrl-Right by word.
+"\e[1;5C": forward-word
+"\e[1;5D": backward-word
+
+set completion-ignore-case on
+set completion-map-case on
+set show-all-if-ambiguous on
+set colored-stats on
+set colored-completion-prefix on
+set mark-symlinked-directories on
+set bell-style none

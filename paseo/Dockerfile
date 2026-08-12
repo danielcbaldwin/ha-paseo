@@ -48,7 +48,11 @@ RUN set -eux; \
         python3-venv \
         rsync \
         ripgrep \
-        unzip; \
+        unzip \
+        bash-completion \
+        fzf \
+        tree \
+        htop; \
     rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------

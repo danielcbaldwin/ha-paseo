@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1-12
+
+- **The terminal is no longer a bare shell.** The container shipped no dotfiles
+  at all and `bash-completion` was not installed, so panes had no completion,
+  no history search and no prompt. First start now seeds `.bashrc`,
+  `.bash_profile` and `.inputrc` into `/data/home` — only when absent, so edits
+  survive restarts and updates.
+  - Up/Down search history for what you have already typed
+  - tab completion for `git`, `apt`, `ssh`, `gh` and the rest
+  - large shared history, appended per command so panes do not clobber
+    each other
+  - prompt showing directory, git branch, and exit status when non-zero
+- Added `bash-completion`, `fzf` (Ctrl-R over history), `tree` and `htop`.
+
 ## 0.3.1-11
 
 - **Fixed: a fresh install could end up with no Home Assistant workspace.**

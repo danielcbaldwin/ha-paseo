@@ -316,6 +316,39 @@ check "password set binds 0.0.0.0 even on relay" \
 docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
+# The container ships no dotfiles, so a terminal pane was a bare shell: no
+# completion, no history search, no prompt.
+step "9a. Interactive shell"
+
+check "dotfiles seeded on first run" \
+    sh -c "docker exec $NAME test -f /data/home/.bashrc \
+        && docker exec $NAME test -f /data/home/.bash_profile \
+        && docker exec $NAME test -f /data/home/.inputrc"
+check "dotfiles owned by the paseo user" \
+    sh -c "[ \"\$(docker exec $NAME stat -c %u /data/home/.bashrc)\" = 1000 ]"
+# A Paseo terminal pane starts a LOGIN shell, which reads .bash_profile and not
+# .bashrc -- without the include, none of this setup would apply.
+check "login shell gets a prompt" \
+    sh -c "docker exec $NAME gosu paseo bash -lic 'echo \$PS1' 2>/dev/null | grep -q paseo"
+check "login shell gets bash-completion" \
+    sh -c "docker exec $NAME gosu paseo bash -lic 'type -t _completion_loader' 2>/dev/null | grep -q function"
+check "git completion resolves through the lazy loader" \
+    sh -c "docker exec $NAME gosu paseo bash -lic '_completion_loader git >/dev/null 2>&1; complete -p git' 2>/dev/null | grep -q __git_wrap"
+check "history is large" \
+    sh -c "docker exec $NAME gosu paseo bash -lic 'echo \$HISTSIZE' 2>/dev/null | grep -q 50000"
+check "arrow-key history search configured" \
+    sh -c "docker exec $NAME grep -q history-search-backward /data/home/.inputrc"
+for t in fzf tree htop; do
+    check "$t available" docker exec "$NAME" sh -c "command -v $t"
+done
+# Seeding promises never to clobber an edit.
+docker exec "$NAME" sh -c 'echo "# USER EDIT" >> /data/home/.bashrc'
+docker restart "$NAME" >/dev/null 2>&1 || true
+wait_healthy || true
+check "an edited .bashrc is not overwritten on restart" \
+    sh -c "docker exec $NAME grep -q '# USER EDIT' /data/home/.bashrc"
+
+# ---------------------------------------------------------------------------
 # Shims must intercept for EVERY caller -- a shell alias cannot, which is the
 # whole reason this exists. The recursion guard is the load-bearing part: a
 # `claude` shim whose command resolves `claude` via PATH would re-enter itself.

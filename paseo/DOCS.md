@@ -643,6 +643,32 @@ is exactly what happened releasing `0.3.1-2`. Releasing is now just:
 
 ---
 
+## The terminal
+
+Terminal panes start a **login** shell as the `paseo` user. The container ships
+no dotfiles of its own, so on first start the add-on seeds three into
+`/data/home`:
+
+| File | What it gives you |
+| --- | --- |
+| `.bashrc` | 50k-line shared history appended per command, colour, git-aware prompt, aliases, bash-completion, `gh` completion (cached), fzf key bindings |
+| `.bash_profile` | Sources `.bashrc` — a login shell would not otherwise read it |
+| `.inputrc` | **Up/Down searches history for what you have typed**, case-insensitive completion, Ctrl-arrow word jumps |
+
+They are **only written when absent**, live on `/data`, and survive restarts and
+add-on updates — so edit them freely. Delete one and restart to get the default
+back.
+
+Also installed for interactive use: `bash-completion`, `fzf` (Ctrl-R over
+history), `tree`, `htop`, plus the `ripgrep`, `jq`, `less` and `nano` that were
+already there. Add more with `extra_apt_packages`.
+
+Completion works through bash-completion's lazy loader, so `git <Tab>`,
+`apt <Tab>` and `ssh <Tab>` all resolve on first use.
+
+The prompt shows the working directory, the git branch when there is one, and
+the exit status only when a command fails.
+
 ## Diagnosing: `ha-paseo-doctor`
 
 Run it from a terminal pane. It reads **live state**, so it does not matter how

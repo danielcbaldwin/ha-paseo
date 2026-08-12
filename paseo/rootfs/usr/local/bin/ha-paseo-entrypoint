@@ -221,6 +221,18 @@ ensure_dir "$workspace_root"
 ensure_dir /share/paseo/bin
 ensure_dir /share/paseo/services
 
+# Seed an interactive shell setup on first run: the container ships no dotfiles
+# at all, so a terminal pane is a bare shell with no completion, no history
+# search and no prompt. Only ever written when absent, so edits survive.
+for _skel in /usr/share/ha-paseo/skel/.*; do
+    [[ -f "$_skel" ]] || continue
+    _dest="/data/home/$(basename "$_skel")"
+    if [[ ! -e "$_dest" ]]; then
+        install -o "$PASEO_UID" -g "$PASEO_GID" -m 0644 "$_skel" "$_dest"
+        log "seeded ~/$(basename "$_skel")"
+    fi
+done
+
 # A restored backup or a hand-edited /share can leave files owned by the wrong
 # uid. Do the expensive recursive pass once, then never again -- worktrees get
 # large and this runs on every boot.

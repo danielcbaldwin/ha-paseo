@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1-14
+
+- **Terminal panes were running dash, not bash.** `SHELL` was unset in the
+  image, and node-pty falls back to `/bin/sh` — which on Debian is dash: no tab
+  completion at all, a bare `$` prompt, and it never reads `.bashrc`. So none of
+  the shell setup added in `0.3.1-12` was reaching the pane. `SHELL=/bin/bash`
+  is now set in the image.
+
+  Symptom was that even `ech<Tab>` did nothing — completing a builtin needs
+  only readline, so that ruled out every explanation except the shell itself.
+
 ## 0.3.1-13
 
 - **Builds no longer use `home-assistant/builder`.** That action prints

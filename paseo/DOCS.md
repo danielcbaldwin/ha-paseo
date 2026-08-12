@@ -645,7 +645,7 @@ is exactly what happened releasing `0.3.1-2`. Releasing is now just:
 
 ## The terminal
 
-Terminal panes start a **login** shell as the `paseo` user. The container ships
+Terminal panes run **bash** as the `paseo` user (the image sets `SHELL`; without it node-pty falls back to `/bin/sh`, which is dash and has no completion). The container ships
 no dotfiles of its own, so on first start the add-on seeds three into
 `/data/home`:
 

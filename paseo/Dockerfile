@@ -105,6 +105,11 @@ RUN set -eux; \
 # upstream, so pointing them at /data (persistent and included in Supervisor
 # backups) is enough to survive updates without patching anything.
 # ---------------------------------------------------------------------------
+# node-pty spawns $SHELL and falls back to /bin/sh when it is unset -- which on
+# Debian is dash: no tab completion, no readline config, and it never reads
+# .bashrc. Terminal panes were getting that rather than bash.
+ENV SHELL=/bin/bash
+
 ENV HOME=/data/home \
     PASEO_HOME=/data/home/.paseo \
     CLAUDE_CONFIG_DIR=/data/home/.claude \

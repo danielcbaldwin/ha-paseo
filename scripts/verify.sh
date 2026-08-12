@@ -320,6 +320,13 @@ docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
 # completion, no history search, no prompt.
 step "9a. Interactive shell"
 
+# node-pty spawns $SHELL and falls back to /bin/sh (dash on Debian) when unset.
+# Dash has no completion at all, so panes had no autocomplete and never read
+# .bashrc -- none of the setup below mattered without this.
+check "SHELL points at bash for spawned terminals" \
+    sh -c "docker exec -u 0 $NAME sh -c 'for p in /proc/[0-9]*; do tr \"\\0\" \"\\n\" < \$p/environ 2>/dev/null; done' | grep -qx 'SHELL=/bin/bash'"
+check "that shell has readline active (dash does not)" \
+    sh -c "docker exec -t $NAME gosu paseo \$(docker exec $NAME printenv SHELL) -ic 'bind -v >/dev/null 2>&1 && echo READLINE_OK' 2>/dev/null | grep -q READLINE_OK"
 check "dotfiles seeded on first run" \
     sh -c "docker exec $NAME test -f /data/home/.bashrc \
         && docker exec $NAME test -f /data/home/.bash_profile \

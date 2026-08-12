@@ -42,7 +42,7 @@ hass-api GET  config
 ha core check          # validate configuration -- ALWAYS before a restart
 ha core restart
 ha core logs
-ha addons list
+ha addons list       # newer Supervisors: `ha apps list`
 ha backups new --name "before <change>"
 ```
 

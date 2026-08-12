@@ -49,10 +49,18 @@ cmd_summary() {
         | sed 's/^/  /' || printf '  (unavailable)\n'
 
     printf '\n## Add-ons\n\n'
-    if ha addons list --raw-json >/dev/null 2>&1; then
-        ha addons list --raw-json \
-            | jq -r '.data.addons[] | "  \(.state | (. + " " * (8 - length)))  \(.slug)"' \
-            | sort
+    # Newer Supervisors renamed add-ons to "apps"; the CLI prints a deprecation
+    # notice for the old name and older Supervisors 404 on the new one. Try the
+    # new spelling, fall back to the old, and keep stderr out of the output --
+    # this is read by agents, and a stray warning line is noise they may act on.
+    local addons=""
+    addons="$(ha apps list --raw-json 2>/dev/null)" \
+        || addons="$(ha addons list --raw-json 2>/dev/null)" \
+        || addons=""
+
+    if [[ -n "$addons" ]] && jq -e '.data' >/dev/null 2>&1 <<<"$addons"; then
+        jq -r '((.data.apps // .data.addons) // [])[]
+               | "  \(.state | (. + " " * (8 - length)))  \(.slug)"' <<<"$addons" | sort
     else
         printf '  (Supervisor unavailable)\n'
     fi

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1-15
+
+- **`ha-inventory` no longer leaks a CLI warning into its output.** Newer
+  Supervisors renamed add-ons to "apps": the CLI prints a deprecation notice for
+  the old spelling, and older Supervisors 404 on the new one. It now tries
+  `ha apps`, falls back to `ha addons`, reads whichever key the response uses,
+  and keeps stderr out of stdout. That output is read by agents, where a stray
+  warning line is noise they may act on.
+- The Home Assistant guide notes both spellings.
+
 ## 0.3.1-14
 
 - **Terminal panes were running dash, not bash.** `SHELL` was unset in the

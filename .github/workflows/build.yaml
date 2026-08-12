@@ -76,19 +76,73 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The official builder emits the io.hass.* labels and the -{arch} image
-      # naming Supervisor expects from a prebuilt add-on image.
-      # --test builds without pushing; only tag pushes publish.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Built with buildx rather than home-assistant/builder, which prints
+      # "deprecated and no longer maintained" and unconditionally installs
+      # cosign from sigstore -- a 503 there failed a release before any build
+      # work had started. Pinning the action would not have helped: the cosign
+      # install has no opt-out. The labels Supervisor reads are set here
+      # explicitly instead, sourced from config.yaml so they cannot drift.
       - name: Build and publish
-        uses: home-assistant/builder@master
-        with:
-          args: >-
-            ${{ steps.meta.outputs.publish == 'true' && ' ' || '--test' }}
-            --${{ matrix.arch }}
-            --target /data/paseo
-            --image ha-paseo-{arch}
-            --docker-hub ghcr.io/danielcbaldwin
-            --addon
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          PUBLISH: ${{ steps.meta.outputs.publish }}
+        run: |
+          set -euo pipefail
+          case "$ARCH" in
+            amd64)   platform=linux/amd64 ;;
+            aarch64) platform=linux/arm64 ;;
+            *) echo "::error::unsupported arch ${ARCH}"; exit 1 ;;
+          esac
+
+          name="$(yq -r '.name' paseo/config.yaml)"
+          description="$(yq -r '.description' paseo/config.yaml)"
+          url="$(yq -r '.url' paseo/config.yaml)"
+          image="ghcr.io/danielcbaldwin/ha-paseo-${ARCH}"
+
+          args=(
+            --platform "$platform"
+            --build-arg "BUILD_ARCH=${ARCH}"
+            --build-arg "BUILD_VERSION=${VERSION}"
+            --label "io.hass.name=${name}"
+            --label "io.hass.description=${description}"
+            --label "io.hass.url=${url}"
+            --label "io.hass.type=addon"
+            --label "io.hass.arch=${ARCH}"
+            --label "io.hass.version=${VERSION}"
+            --label "org.opencontainers.image.source=${url}"
+            --label "org.opencontainers.image.version=${VERSION}"
+            --label "org.opencontainers.image.licenses=MIT"
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            --tag "${image}:${VERSION}"
+          )
+          if [[ "$PUBLISH" == "true" ]]; then
+            args+=(--tag "${image}:latest" --push)
+          else
+            args+=(--load)
+          fi
+
+          docker buildx build "${args[@]}" paseo/
+
+      # Supervisor refuses an add-on image without these, so a silent label
+      # regression would only surface as a failed install on a real instance.
+      - name: Verify the labels Supervisor requires
+        if: ${{ steps.meta.outputs.publish == 'true' }}
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/danielcbaldwin/ha-paseo-${ARCH}:${VERSION}"
+          labels="$(docker buildx imagetools inspect "$image" --format '{{json .Image}}' \
+                    | jq -r '.. | .Labels? // empty | to_entries[] | "\(.key)=\(.value)"' | sort -u)"
+          printf '%s\n' "$labels"
+          for want in "io.hass.type=addon" "io.hass.arch=${ARCH}" "io.hass.version=${VERSION}"; do
+            grep -qxF "$want" <<<"$labels" || { echo "::error::missing label ${want}"; exit 1; }
+          done
 
   # Only now, with images on GHCR for every architecture, is it safe to tell
   # Home Assistant a new version exists. Doing this before the build is what

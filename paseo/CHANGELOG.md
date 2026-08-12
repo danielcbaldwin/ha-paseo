@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1-13
+
+- **Builds no longer use `home-assistant/builder`.** That action prints
+  "deprecated and no longer maintained" on every run, and unconditionally
+  installs cosign from sigstore — a 503 there failed a release before any build
+  work started. There is no opt-out, so pinning the action would not have
+  helped. Images are now built with `docker buildx` directly.
+- The `io.hass.*` labels Supervisor requires are set explicitly from
+  `config.yaml`, so they cannot drift from the manifest, and CI now asserts the
+  critical ones are present on the pushed image rather than discovering a
+  regression as a failed install.
+- Label set verified identical to what the old builder produced.
+
 ## 0.3.1-12
 
 - **The terminal is no longer a bare shell.** The container shipped no dotfiles

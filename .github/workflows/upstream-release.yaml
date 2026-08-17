@@ -1,0 +1,275 @@
+---
+name: Release on upstream Paseo
+
+# When upstream publishes a new stable Paseo tag, ship it: repin the base image,
+# bump the add-on's minor version, cut the tag, and let build.yaml publish it.
+#
+# The add-on version is the add-on's own (see DOCS.md, "Versioning"), so nothing
+# here derives it from upstream's number -- an upstream release just means the
+# base image moved, which is a minor bump.
+#
+# check-updates.yaml still reports staleness as a weekly issue. It stays as a
+# fallback: if this workflow breaks, that issue is how you find out.
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"   # every 6h, off the hour to avoid the stampede
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Rewrite the pins and print the diff, but do not commit, tag or release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # commit the repin to main and push the tag
+  actions: write    # dispatch build.yaml (see "Trigger the release build")
+
+# Two overlapping runs would race to create the same tag.
+concurrency:
+  group: upstream-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Repin and release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # Stable tags only. Upstream ships 0.4.0-beta.1 and friends, which must
+      # never auto-release.
+      #
+      # Sorted numerically rather than trusting the API's ordering, and capped at
+      # one page: 100 newest tags is far more than enough to find the highest, and
+      # --paginate over a tag list is not worth the requests.
+      - name: Resolve the newest stable upstream tag
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          latest="$(gh api 'repos/getpaseo/paseo/tags?per_page=100' --jq '
+            [.[].name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("v")]
+            | sort_by(split(".") | map(tonumber)) | last')"
+          if [[ -z "$latest" || "$latest" == "null" ]]; then
+            echo "::error::found no stable vX.Y.Z tag on getpaseo/paseo"
+            exit 1
+          fi
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+          echo "newest stable upstream tag: ${latest}"
+
+      - name: Compare against the pinned base image
+        id: compare
+        env:
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+          pinned="$(sed -n 's|.*ghcr.io/getpaseo/paseo:||p' paseo/build.yaml | head -1)"
+          echo "pinned=${pinned}" >> "$GITHUB_OUTPUT"
+          echo "pinned ${pinned} vs upstream ${LATEST}"
+
+          if [[ "$pinned" == "$LATEST" ]]; then
+            echo "already on ${LATEST}; nothing to do"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Guard against going backwards -- a deleted upstream tag or a bad parse
+          # should stall, not downgrade everyone.
+          newest="$(printf '%s\n%s\n' "$pinned" "$LATEST" | sort -V | tail -1)"
+          if [[ "$newest" != "$LATEST" ]]; then
+            echo "::warning::upstream ${LATEST} is not newer than the pin ${pinned}; refusing to move"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      # The add-on ships amd64 and aarch64. A release that dropped one would
+      # otherwise fail deep inside the matrix build with a confusing error.
+      - name: Require both architectures in the upstream index
+        if: steps.compare.outputs.proceed == 'true'
+        env:
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+          platforms="$(docker buildx imagetools inspect "ghcr.io/getpaseo/paseo:${LATEST}" --raw \
+                       | jq -r '.manifests[]? | select(.platform) | "\(.platform.os)/\(.platform.architecture)"' \
+                       | sort -u)"
+          printf 'platforms in ghcr.io/getpaseo/paseo:%s\n%s\n' "$LATEST" "$platforms"
+          for want in linux/amd64 linux/arm64; do
+            grep -qxF "$want" <<<"$platforms" \
+              || { echo "::error::upstream ${LATEST} has no ${want}"; exit 1; }
+          done
+
+      - name: Resolve the image digest
+        id: digest
+        if: steps.compare.outputs.proceed == 'true'
+        env:
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+          digest="$(docker buildx imagetools inspect "ghcr.io/getpaseo/paseo:${LATEST}" \
+                    --format '{{.Manifest.Digest}}')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            || { echo "::error::unexpected digest '${digest}'"; exit 1; }
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "${LATEST} -> ${digest}"
+
+      # Minor bump: an upstream release means the base image moved. Patch releases
+      # are add-on-only changes and are cut by hand with scripts/release.sh.
+      - name: Compute the next add-on version
+        id: version
+        if: steps.compare.outputs.proceed == 'true'
+        run: |
+          set -euo pipefail
+          cur="$(yq -r '.version' paseo/config.yaml)"
+
+          # Load-bearing. Under the retired "<upstream>-<revision>" scheme a value
+          # like 0.3.1-15 would parse as major 0, minor 3 and produce 0.4.0 -- an
+          # add-on version colliding with upstream's own numbering. Stall instead.
+          if [[ ! "$cur" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::config.yaml version '${cur}' is not plain semver;" \
+                 "cut v1.0.0 by hand first (see DOCS.md, \"Versioning\")"
+            exit 1
+          fi
+
+          IFS=. read -r maj min _ <<<"$cur"
+          next="${maj}.$((min + 1)).0"
+          echo "next=${next}" >> "$GITHUB_OUTPUT"
+          echo "add-on ${cur} -> ${next}"
+
+      # Tags are not fetched by a shallow checkout, so ask the remote.
+      - name: Refuse to reuse an existing tag
+        id: tagcheck
+        if: steps.compare.outputs.proceed == 'true'
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/v${NEXT}" >/dev/null 2>&1; then
+            echo "::warning::tag v${NEXT} already exists; a previous run got this far"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Repin the base image
+        if: steps.compare.outputs.proceed == 'true' && steps.tagcheck.outputs.proceed == 'true'
+        env:
+          PINNED: ${{ steps.compare.outputs.pinned }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          # The digest comment is matched on a full 64-hex digest so the prose in
+          # both files that mentions `<version> -> sha256:<digest>` is left alone.
+          for f in paseo/build.yaml paseo/Dockerfile; do
+            sed -i -E \
+              -e "s|ghcr\.io/getpaseo/paseo:[0-9]+\.[0-9]+\.[0-9]+|ghcr.io/getpaseo/paseo:${LATEST}|g" \
+              -e "s|^(#[[:space:]]*)[0-9]+\.[0-9]+\.[0-9]+ -> sha256:[0-9a-f]{64}|\1${LATEST} -> ${DIGEST}|" \
+              "$f"
+          done
+
+          # A silent sed no-op would republish the previous base image under a new
+          # version number -- the exact failure this workflow exists to avoid.
+          for f in paseo/build.yaml paseo/Dockerfile; do
+            grep -q "ghcr.io/getpaseo/paseo:${LATEST}" "$f" \
+              || { echo "::error::${f}: image tag was not rewritten"; exit 1; }
+            grep -q -- "${LATEST} -> ${DIGEST}" "$f" \
+              || { echo "::error::${f}: digest comment was not rewritten"; exit 1; }
+            if grep -q "ghcr.io/getpaseo/paseo:${PINNED}" "$f"; then
+              echo "::error::${f}: still references the old pin ${PINNED}"
+              exit 1
+            fi
+          done
+
+      - name: Add the changelog entry
+        if: steps.compare.outputs.proceed == 'true' && steps.tagcheck.outputs.proceed == 'true'
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          PINNED: ${{ steps.compare.outputs.pinned }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cl=paseo/CHANGELOG.md
+          [[ "$(head -1 "$cl")" == "# Changelog" ]] \
+            || { echo "::error::${cl} does not start with '# Changelog'"; exit 1; }
+
+          {
+            echo "# Changelog"
+            echo
+            echo "## ${NEXT}"
+            echo
+            echo "- **Paseo ${LATEST}.** The base image moved from \`${PINNED}\` to"
+            echo "  \`${LATEST}\` (\`${DIGEST}\`). Released automatically when the upstream"
+            echo "  tag appeared; the add-on itself is unchanged."
+            echo
+            tail -n +3 "$cl"
+          } > "${cl}.new"
+          mv "${cl}.new" "$cl"
+          head -12 "$cl"
+
+      - name: Show the diff
+        if: steps.compare.outputs.proceed == 'true' && steps.tagcheck.outputs.proceed == 'true'
+        run: git --no-pager diff
+
+      - name: Stop here (dry run)
+        if: >-
+          inputs.dry_run &&
+          steps.compare.outputs.proceed == 'true' &&
+          steps.tagcheck.outputs.proceed == 'true'
+        run: echo "::notice::dry run -- not committing, tagging or releasing"
+
+      # No [skip ci] on this commit. Skip directives are evaluated against the head
+      # commit of a push, and the tag below points at this very commit -- so marking
+      # it would risk suppressing the release build too. Nothing is lost: a push
+      # made with GITHUB_TOKEN does not trigger workflows anyway.
+      - name: Commit and tag
+        if: >-
+          !inputs.dry_run &&
+          steps.compare.outputs.proceed == 'true' &&
+          steps.tagcheck.outputs.proceed == 'true'
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "::error::nothing changed; refusing to tag an empty release"
+            exit 1
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "Pin Paseo ${LATEST} for add-on ${NEXT}"
+          git push origin main
+          git tag -a "v${NEXT}" -m "Release ${NEXT} (Paseo ${LATEST})"
+          git push origin "v${NEXT}"
+
+      # The tag push above will NOT start build.yaml: GitHub does not create
+      # workflow runs from events triggered by GITHUB_TOKEN. workflow_dispatch is
+      # a documented exception -- it always creates a run -- so dispatch it
+      # explicitly. That is why this needs no PAT or GitHub App token.
+      #
+      # build.yaml needs nothing special to accept this: dispatched against a tag
+      # ref, GITHUB_REF is refs/tags/vX.Y.Z, which is what its publish branch and
+      # its bump job already key off.
+      - name: Trigger the release build
+        if: >-
+          !inputs.dry_run &&
+          steps.compare.outputs.proceed == 'true' &&
+          steps.tagcheck.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.version.outputs.next }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+          gh workflow run build.yaml --ref "v${NEXT}"
+          echo "::notice::dispatched build.yaml for v${NEXT} (Paseo ${LATEST})"
+          echo "If this step fails, the tag exists but nothing was published and"
+          echo "main still advertises the previous version -- no instance is"
+          echo "offered a broken update. Re-run with: gh workflow run build.yaml --ref v${NEXT}"

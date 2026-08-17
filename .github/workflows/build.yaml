@@ -144,12 +144,56 @@ jobs:
             grep -qxF "$want" <<<"$labels" || { echo "::error::missing label ${want}"; exit 1; }
           done
 
-  # Only now, with images on GHCR for every architecture, is it safe to tell
-  # Home Assistant a new version exists. Doing this before the build is what
-  # produced "Can't install ...: [404] manifest unknown" on every instance.
+  # Run the local integration harness against the image that was just published,
+  # before anything advertises it.
+  #
+  # This gates `bump`, not the push, on purpose: an image sitting on GHCR is inert
+  # until config.yaml names its version, so publishing first and verifying second
+  # costs nothing and keeps the build job's single build-and-push intact. It earns
+  # its keep on releases cut by upstream-release.yaml, where no human has looked at
+  # the new base image -- verify.sh covers exactly what a base-image change breaks
+  # (state landing on /data rather than the anonymous volume, the seeded config, the
+  # entrypoint's connection modes, shims, services).
+  #
+  # amd64 only. aarch64 would need QEMU, and verify.sh boots the container a dozen
+  # times over -- far too slow to sit in the release path.
+  verify:
+    name: Verify the published image
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derived from the ref, not from a `build` job output: `build` is a matrix
+      # and matrix outputs are last-writer-wins across legs. This job only runs
+      # on tags, so the ref is authoritative -- same as the bump job below.
+      - name: Run scripts/verify.sh against the published amd64 image
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/v}"
+          image="ghcr.io/danielcbaldwin/ha-paseo-amd64:${version}"
+          docker pull "$image"
+          ./scripts/verify.sh "$image"
+
+  # Only now, with images on GHCR for every architecture and the harness green, is
+  # it safe to tell Home Assistant a new version exists. Doing this before the
+  # build is what produced "Can't install ...: [404] manifest unknown" on every
+  # instance.
   bump:
     name: Advertise the published version
-    needs: build
+    needs: verify
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

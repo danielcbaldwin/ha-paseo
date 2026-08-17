@@ -595,6 +595,34 @@ Pinned to an exact upstream release tag in `paseo/build.yaml`, never `latest`.
 It moves when the add-on is rebuilt and republished, and you take it by updating
 the add-on in Home Assistant like any other.
 
+You no longer have to wait for anyone to notice: a scheduled workflow
+(`.github/workflows/upstream-release.yaml`) checks upstream every six hours and,
+when a new **stable** Paseo tag appears, repins the base image and cuts a release
+by itself. Prereleases (`0.4.0-beta.1`) are ignored. See *Updating Paseo* below.
+
+### Versioning
+
+The add-on version is **the add-on's own** and says nothing about which Paseo it
+contains. Earlier versions looked like `0.3.1-15`, which meant "Paseo 0.3.1,
+add-on revision 15" — that coupling forced fifteen releases to borrow a number
+from an upstream that had not moved, and it left no way to describe an add-on
+change at all. It is retired as of `1.0.0`.
+
+| Bump | Means |
+| --- | --- |
+| minor (`1.0.0` → `1.1.0`) | the base image moved to a new Paseo release |
+| patch (`1.0.0` → `1.0.1`) | an add-on-only change; Paseo is untouched |
+
+**To find out which Paseo you are actually running**, ask the container rather
+than reading the add-on version:
+
+```bash
+ha-paseo-doctor | head -4      # reports both, as `version` and `paseo`
+```
+
+The image records both in `/etc/ha-paseo-release` at build time, read from the
+installed package — so it states what is really there.
+
 ### Knowing when anything is behind
 
 Everything being pinned is good for reproducibility and bad for staleness —
@@ -604,7 +632,7 @@ upstream, and keeps a single **"Upstream updates available"** issue up to date
 with a table of what is behind. Run it on demand from the Actions tab.
 
 Why pin at all? Unpinned `npm install -g` means rebuilding add-on version
-`0.3.1-1` in three months silently produces different agent versions — the
+`1.0.1` in three months silently produces different agent versions — the
 version number stops meaning anything.
 
 ## Updating Paseo
@@ -612,16 +640,48 @@ version number stops meaning anything.
 The base image is pinned to an exact upstream release tag in `paseo/build.yaml`,
 never `latest`. The add-on linter rejects digest references there, so the
 resolved digest is recorded in a comment alongside it for audit rather than
-enforced by the build. To move to a new Paseo release:
+enforced by the build.
+
+**This is automated.** `.github/workflows/upstream-release.yaml` runs every six
+hours (and on demand from the Actions tab) and, when upstream publishes a newer
+stable tag, does the whole release:
+
+1. Resolves the newest stable `vX.Y.Z` upstream tag, ignoring prereleases.
+2. Refuses to continue unless the index has both `linux/amd64` and `linux/arm64`.
+3. Repins both `build_from` lines, the `ARG BUILD_FROM` default in the
+   `Dockerfile`, and both digest comments — then asserts the rewrite actually
+   happened, because a silently failed edit would republish the old base image
+   under a new version number.
+4. Bumps the add-on **minor** version, adds a `CHANGELOG.md` entry, commits, tags.
+5. Triggers the release build.
+
+Run it with the **dry run** input ticked to see the diff it would make without
+committing anything.
+
+Two things to know if you ever change that workflow:
+
+- It must dispatch `build.yaml` explicitly. GitHub does not create workflow runs
+  from events triggered by `GITHUB_TOKEN`, so the tag push alone will not start a
+  build; `workflow_dispatch` is a documented exception. This is why no PAT is
+  needed, and why removing the dispatch step would silently stop all releases.
+- The prep commit must **not** carry `[skip ci]`. Skip directives are evaluated
+  against the head commit of a push, and the release tag points at that same
+  commit.
+
+### Doing it by hand
+
+Still supported, and what you use for an add-on-only change:
 
 1. Confirm the tag has both `linux/amd64` and `linux/arm64`.
-2. Update both `build_from` lines and the digest comment in `build.yaml`.
-3. Add a `CHANGELOG.md` entry, push, then tag `v0.3.2-1`.
+2. Update both `build_from` lines and the digest comment in `build.yaml`, and the
+   matching pair in `Dockerfile`.
+3. Add a `CHANGELOG.md` entry, push, then tag.
 
 Use the release script, which enforces the ordering below:
 
 ```bash
-./scripts/release.sh 0.3.2-1
+./scripts/release.sh 1.1.0    # base image moved
+./scripts/release.sh 1.0.1    # add-on-only change
 ```
 
 **Do not edit `version` in `config.yaml` by hand.** The tag is the source of
@@ -638,8 +698,15 @@ every instance offer an update that fails with `[404] manifest unknown` — whic
 is exactly what happened releasing `0.3.1-2`. Releasing is now just:
 
 ```bash
-./scripts/release.sh 0.3.2-1
+./scripts/release.sh 1.0.1
 ```
+
+Between publishing and advertising there is one more gate: a `verify` job pulls
+the amd64 image that was just pushed and runs `scripts/verify.sh` against it. If
+the harness fails, `config.yaml` is never bumped, so no instance is offered the
+release. That gate exists mainly for the automated path, where nobody has looked
+at the new base image before it shipped. It covers amd64 only — aarch64 under
+QEMU is far too slow to sit in the release path.
 
 ---
 
@@ -679,7 +746,8 @@ and the startup lines scroll away within seconds.
 $ ha-paseo-doctor
 
 Add-on
-          version   0.3.1-10
+          version   1.0.0
+          paseo     0.4.0
           listen    0.0.0.0:6767
           mode      relay
           password  (blank)

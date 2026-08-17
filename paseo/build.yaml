@@ -3,15 +3,18 @@
 # rejects digest references here (build_from must be a tag), so this is a tag --
 # the digest it resolved to at the time is recorded below for audit:
 #
-#   0.3.1 -> sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
+#   0.4.0 -> sha256:593cb65b1eabee061af8f240fcb4031818e9c330fe66b584c345e3b296531b95
 #
 # Both architectures resolve from the same multi-arch index; the builder selects
-# the right platform. To bump: confirm the new tag has linux/amd64 and
-# linux/arm64, update both lines here, the digest comment, and the version in
-# config.yaml. See DOCS.md, "Updating Paseo".
+# the right platform.
+#
+# These three lines are normally rewritten by .github/workflows/upstream-release.yaml
+# when a new upstream tag appears -- it checks both platforms are present, records
+# the digest, and cuts a release. Keep the comment's `<version> -> sha256:<digest>`
+# shape: that workflow's sed patterns match on it. See DOCS.md, "Updating Paseo".
 build_from:
-  amd64: ghcr.io/getpaseo/paseo:0.3.1
-  aarch64: ghcr.io/getpaseo/paseo:0.3.1
+  amd64: ghcr.io/getpaseo/paseo:0.4.0
+  aarch64: ghcr.io/getpaseo/paseo:0.4.0
 
 args:
   HA_CLI_VERSION: "5.3.0"

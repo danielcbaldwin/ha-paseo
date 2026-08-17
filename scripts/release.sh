@@ -2,7 +2,11 @@
 #
 # Cut a release.
 #
-#   ./scripts/release.sh 0.3.2-1
+#   ./scripts/release.sh 1.0.1
+#
+# The add-on version is the add-on's own, unrelated to Paseo's. Bump the minor
+# when the base image moves, the patch for an add-on-only change. Base image
+# bumps are normally released by the upstream-release workflow rather than here.
 #
 # CI now pushes to main itself (the "Advertise the published version" job), so a
 # local checkout goes stale after every release. Tagging from a stale base put
@@ -16,11 +20,12 @@ set -euo pipefail
 
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then
-    echo "usage: ${0##*/} <version>   e.g. 0.3.2-1" >&2
+    echo "usage: ${0##*/} <version>   e.g. 1.0.1" >&2
     exit 2
 fi
-if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$ ]]; then
-    echo "version must look like 0.3.2-1 (upstream-addonrevision)" >&2
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "version must be plain semver, e.g. 1.0.1 -- the add-on's own number," >&2
+    echo "not Paseo's. The old '<upstream>-<revision>' form is retired." >&2
     exit 2
 fi
 

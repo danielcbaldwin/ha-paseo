@@ -647,31 +647,53 @@ resolved digest is recorded in a comment alongside it for audit rather than
 enforced by the build.
 
 **This is automated.** `.github/workflows/upstream-release.yaml` runs every six
-hours (and on demand from the Actions tab) and, when upstream publishes a newer
-stable tag, does the whole release:
+hours (and on demand from the Actions tab), notices a Paseo release you have not
+shipped, and does the whole thing:
 
 1. Resolves the newest stable `vX.Y.Z` upstream tag, ignoring prereleases.
-2. Refuses to continue unless the index has both `linux/amd64` and `linux/arm64`.
-3. Repins both `build_from` lines, the `ARG BUILD_FROM` default in the
-   `Dockerfile`, and both digest comments — then asserts the rewrite actually
-   happened, because a silently failed edit would republish the old base image
+2. Compares it against the **version in `config.yaml`** — what instances are
+   actually offered — and stops if that already carries this Paseo.
+3. Refuses to continue unless the index has both `linux/amd64` and `linux/arm64`.
+4. Repins both `build_from` lines, the `ARG BUILD_FROM` default in the
+   `Dockerfile`, and both digest comments — then asserts the result really is the
+   new version, because a silently failed edit would build the *old* base image
    under a new version number.
-4. Tags `<upstream>-1` — e.g. upstream `0.4.1` becomes add-on `0.4.1-1` — adds a
+5. Tags `<upstream>-1` — upstream `0.4.1` becomes add-on `0.4.1-1` — adds a
    `CHANGELOG.md` entry, and commits.
-5. Triggers the release build.
+6. Triggers the release build.
 
 Run it with the **dry run** input ticked to see the diff it would make without
 committing anything.
 
-Two things to know if you ever change that workflow:
+### Why step 2 compares against config.yaml, not the pin
+
+Tempting to compare upstream against the pin in `build.yaml`, since that is the
+thing being rewritten. It is wrong: the pin is what the *next build* would use,
+not what shipped. The two come apart in two real situations, and in both,
+comparing against the pin makes a needed release look like "nothing to do":
+
+- The pin was bumped by hand without cutting a release.
+- A release failed *after* this workflow committed its repin — so the pin is new
+  while `config.yaml` still names the old version. Keyed off the pin, every
+  future run would skip, and one transient build failure would stall releases
+  permanently.
+
+`config.yaml` is only written after both architectures publish, so it is the one
+honest record of what exists. Consequences: the repin is idempotent (an
+already-correct pin is a valid state to release from, not an error), and if the
+tag already exists the workflow **re-dispatches the build** instead of giving up.
+
+Two more things to know if you ever change that workflow:
 
 - It must dispatch `build.yaml` explicitly. GitHub does not create workflow runs
   from events triggered by `GITHUB_TOKEN`, so the tag push alone will not start a
   build; `workflow_dispatch` is a documented exception. This is why no PAT is
   needed, and why removing the dispatch step would silently stop all releases.
-- The prep commit must **not** carry `[skip ci]`. Skip directives are evaluated
+- The prep commit must **not** carry a CI-skip marker. Those are evaluated
   against the head commit of a push, and the release tag points at that same
-  commit.
+  commit — so marking it can suppress the release build. (Worth knowing: the
+  marker is matched anywhere in the message, body included, not just the
+  subject.)
 
 ### Doing it by hand
 

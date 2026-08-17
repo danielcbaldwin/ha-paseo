@@ -1,29 +1,27 @@
 # Changelog
 
-## 1.0.0
+## 0.4.0-1
 
-- **The add-on version is now its own, unrelated to Paseo's.** It used to be
-  `<upstream>-<revision>` — `0.3.1-15` meant "Paseo 0.3.1, add-on revision 15".
-  That coupling made fifteen add-on releases borrow a version number from an
-  upstream that had not moved, while giving no way to say "the add-on changed".
-  From here: a **minor** bump means the base image moved to a new Paseo, a
-  **patch** means an add-on-only change. Home Assistant sees `1.0.0` as a normal
-  update from `0.3.1-15`.
-- **`ha-paseo-doctor` reports the bundled Paseo version** as `paseo`, next to the
-  add-on `version`. With the two numbers no longer related, this is how you find
-  out which daemon you are running; the image records both in
-  `/etc/ha-paseo-release`, read from the installed package at build time.
 - **Paseo 0.4.0.** The base image moved from `0.3.1` to `0.4.0`
   (`sha256:593cb65b1eabee061af8f240fcb4031818e9c330fe66b584c345e3b296531b95`).
 - **New Paseo releases now ship by themselves.** A scheduled workflow checks
-  upstream every six hours and, on a new stable tag, repins the base image, bumps
-  the minor version and cuts the release. Prereleases are ignored. Previously a
-  weekly job filed an issue and the release still waited on a human — which is
-  why 0.4.0 sat unshipped.
+  upstream every six hours and, on a new stable tag, repins the base image and
+  releases `<upstream>-1` — so the add-on version keeps stating which Paseo is
+  inside, without waiting on anyone. Prereleases are ignored. Previously a weekly
+  job filed an issue and the release still waited on a human, which is why 0.4.0
+  sat unshipped.
+- **`scripts/release.sh` now refuses a version that disagrees with the pin.**
+  Releasing `0.4.0-2` from a tree still pinned to `0.3.1` used to be possible, and
+  produced a version number that lied about its contents.
+- **`ha-paseo-doctor` reports the Paseo version recorded in the image** as
+  `paseo`, next to the add-on `version`. The two should always agree; this makes
+  it visible when they do not. Taken from the installed package at build time and
+  stored in `/etc/ha-paseo-release`.
 - **Releases are verified before they are advertised.** `scripts/verify.sh` now
   runs in CI against the published amd64 image, gating the commit that tells
   Home Assistant a new version exists. A base image that broke the add-on is
-  never offered to an instance.
+  never offered to an instance — which matters now that upstream bumps ship
+  without anyone reviewing them.
 
 ## 0.3.1-15
 

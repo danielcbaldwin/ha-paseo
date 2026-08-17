@@ -2,11 +2,16 @@
 #
 # Cut a release.
 #
-#   ./scripts/release.sh 1.0.1
+#   ./scripts/release.sh 0.4.0-2
 #
-# The add-on version is the add-on's own, unrelated to Paseo's. Bump the minor
-# when the base image moves, the patch for an add-on-only change. Base image
-# bumps are normally released by the upstream-release workflow rather than here.
+# The version is <upstream-paseo-version>-<addon-revision>, so it always states
+# which Paseo is inside. The upstream part is checked against the pin in
+# build.yaml below -- releasing 0.4.0-2 from a tree pinned to 0.3.1 would make the
+# version lie.
+#
+# A new upstream release is normally shipped by the upstream-release workflow,
+# which repins and tags <upstream>-1 by itself. Use this script for add-on-only
+# changes: bump the revision, leave the upstream part alone.
 #
 # CI now pushes to main itself (the "Advertise the published version" job), so a
 # local checkout goes stale after every release. Tagging from a stale base put
@@ -20,12 +25,11 @@ set -euo pipefail
 
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then
-    echo "usage: ${0##*/} <version>   e.g. 1.0.1" >&2
+    echo "usage: ${0##*/} <version>   e.g. 0.4.0-2" >&2
     exit 2
 fi
-if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "version must be plain semver, e.g. 1.0.1 -- the add-on's own number," >&2
-    echo "not Paseo's. The old '<upstream>-<revision>' form is retired." >&2
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$ ]]; then
+    echo "version must look like 0.4.0-2 (upstream-addonrevision)" >&2
     exit 2
 fi
 
@@ -33,6 +37,15 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 die() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 ok()  { printf '\033[32m%s\033[0m\n' "$*"; }
+
+# 0. The version's upstream part must match the pinned base image, or the number
+#    stops meaning what it says. Cheap to check, and the whole point of tying the
+#    two together.
+PINNED="$(sed -n 's|.*ghcr.io/getpaseo/paseo:||p' paseo/build.yaml | head -1)"
+if [[ "${VERSION%-*}" != "$PINNED" ]]; then
+    die "version ${VERSION} claims Paseo ${VERSION%-*} but build.yaml pins ${PINNED};
+repin the base image first, or release ${PINNED}-<revision> instead"
+fi
 
 # 1. Nothing uncommitted -- otherwise the rebase below silently does nothing.
 if [[ -n "$(git status --porcelain)" ]]; then

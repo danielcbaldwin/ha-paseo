@@ -602,26 +602,30 @@ by itself. Prereleases (`0.4.0-beta.1`) are ignored. See *Updating Paseo* below.
 
 ### Versioning
 
-The add-on version is **the add-on's own** and says nothing about which Paseo it
-contains. Earlier versions looked like `0.3.1-15`, which meant "Paseo 0.3.1,
-add-on revision 15" — that coupling forced fifteen releases to borrow a number
-from an upstream that had not moved, and it left no way to describe an add-on
-change at all. It is retired as of `1.0.0`.
+The add-on version is **`<upstream-paseo-version>-<addon-revision>`**, so it
+always tells you which Paseo is inside: `0.4.0-2` is the second add-on release
+carrying Paseo 0.4.0.
 
-| Bump | Means |
+| Part | Moves when |
 | --- | --- |
-| minor (`1.0.0` → `1.1.0`) | the base image moved to a new Paseo release |
-| patch (`1.0.0` → `1.0.1`) | an add-on-only change; Paseo is untouched |
+| `0.4.0` | the base image moves to a new Paseo release — done automatically |
+| `-2` | the add-on itself changes; Paseo is untouched |
 
-**To find out which Paseo you are actually running**, ask the container rather
-than reading the add-on version:
+Both halves are enforced rather than trusted:
+
+- `scripts/release.sh` refuses a version whose upstream part disagrees with the
+  base image pinned in `build.yaml`, so the number cannot drift from reality.
+- A new upstream release is tagged `<upstream>-1` by the auto-release workflow,
+  derived from upstream's tag rather than by incrementing whatever the previous
+  version happened to be.
+
+As a cross-check, `ha-paseo-doctor` reports the version recorded *in the image*
+next to the add-on version — read from the installed package at build time, so
+the two disagreeing is visible rather than silent:
 
 ```bash
-ha-paseo-doctor | head -4      # reports both, as `version` and `paseo`
+ha-paseo-doctor | head -4      # `version` (add-on) and `paseo` (what shipped)
 ```
-
-The image records both in `/etc/ha-paseo-release` at build time, read from the
-installed package — so it states what is really there.
 
 ### Knowing when anything is behind
 
@@ -632,7 +636,7 @@ upstream, and keeps a single **"Upstream updates available"** issue up to date
 with a table of what is behind. Run it on demand from the Actions tab.
 
 Why pin at all? Unpinned `npm install -g` means rebuilding add-on version
-`1.0.1` in three months silently produces different agent versions — the
+`0.4.0-1` in three months silently produces different agent versions — the
 version number stops meaning anything.
 
 ## Updating Paseo
@@ -652,7 +656,8 @@ stable tag, does the whole release:
    `Dockerfile`, and both digest comments — then asserts the rewrite actually
    happened, because a silently failed edit would republish the old base image
    under a new version number.
-4. Bumps the add-on **minor** version, adds a `CHANGELOG.md` entry, commits, tags.
+4. Tags `<upstream>-1` — e.g. upstream `0.4.1` becomes add-on `0.4.1-1` — adds a
+   `CHANGELOG.md` entry, and commits.
 5. Triggers the release build.
 
 Run it with the **dry run** input ticked to see the diff it would make without
@@ -680,9 +685,12 @@ Still supported, and what you use for an add-on-only change:
 Use the release script, which enforces the ordering below:
 
 ```bash
-./scripts/release.sh 1.1.0    # base image moved
-./scripts/release.sh 1.0.1    # add-on-only change
+./scripts/release.sh 0.4.0-2    # add-on-only change, still on Paseo 0.4.0
+./scripts/release.sh 0.4.1-1    # after repinning to Paseo 0.4.1 by hand
 ```
+
+It refuses a version whose upstream part does not match the pin in `build.yaml`,
+so step 2 cannot be forgotten.
 
 **Do not edit `version` in `config.yaml` by hand.** The tag is the source of
 truth; CI writes the version into the image it builds and then commits the bump
@@ -698,7 +706,7 @@ every instance offer an update that fails with `[404] manifest unknown` — whic
 is exactly what happened releasing `0.3.1-2`. Releasing is now just:
 
 ```bash
-./scripts/release.sh 1.0.1
+./scripts/release.sh 0.4.0-2
 ```
 
 Between publishing and advertising there is one more gate: a `verify` job pulls
@@ -746,7 +754,7 @@ and the startup lines scroll away within seconds.
 $ ha-paseo-doctor
 
 Add-on
-          version   1.0.0
+          version   0.4.0-1
           paseo     0.4.0
           listen    0.0.0.0:6767
           mode      relay

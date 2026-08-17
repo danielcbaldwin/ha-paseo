@@ -2,11 +2,11 @@
 name: Release on upstream Paseo
 
 # When upstream publishes a new stable Paseo tag, ship it: repin the base image,
-# bump the add-on's minor version, cut the tag, and let build.yaml publish it.
+# tag <upstream>-1, and let build.yaml publish it.
 #
-# The add-on version is the add-on's own (see DOCS.md, "Versioning"), so nothing
-# here derives it from upstream's number -- an upstream release just means the
-# base image moved, which is a minor bump.
+# The add-on version stays in step with Paseo's on purpose -- it is
+# <upstream-paseo-version>-<addon-revision>, so the number always states which
+# daemon is inside. This workflow is what keeps that true without a human.
 #
 # check-updates.yaml still reports staleness as a weekly issue. It stays as a
 # fallback: if this workflow breaks, that issue is how you find out.
@@ -117,28 +117,20 @@ jobs:
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
           echo "${LATEST} -> ${digest}"
 
-      # Minor bump: an upstream release means the base image moved. Patch releases
-      # are add-on-only changes and are cut by hand with scripts/release.sh.
+      # The add-on version is <upstream>-<revision>, so a new upstream release is
+      # always revision 1 of that version -- derived from upstream rather than by
+      # incrementing whatever config.yaml happens to say. Add-on-only changes bump
+      # the revision by hand via scripts/release.sh.
       - name: Compute the next add-on version
         id: version
         if: steps.compare.outputs.proceed == 'true'
+        env:
+          LATEST: ${{ steps.upstream.outputs.latest }}
         run: |
           set -euo pipefail
-          cur="$(yq -r '.version' paseo/config.yaml)"
-
-          # Load-bearing. Under the retired "<upstream>-<revision>" scheme a value
-          # like 0.3.1-15 would parse as major 0, minor 3 and produce 0.4.0 -- an
-          # add-on version colliding with upstream's own numbering. Stall instead.
-          if [[ ! "$cur" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::config.yaml version '${cur}' is not plain semver;" \
-                 "cut v1.0.0 by hand first (see DOCS.md, \"Versioning\")"
-            exit 1
-          fi
-
-          IFS=. read -r maj min _ <<<"$cur"
-          next="${maj}.$((min + 1)).0"
+          next="${LATEST}-1"
           echo "next=${next}" >> "$GITHUB_OUTPUT"
-          echo "add-on ${cur} -> ${next}"
+          echo "add-on $(yq -r '.version' paseo/config.yaml) -> ${next}"
 
       # Tags are not fetched by a shallow checkout, so ask the remote.
       - name: Refuse to reuse an existing tag

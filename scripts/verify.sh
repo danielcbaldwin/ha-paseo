@@ -33,6 +33,45 @@ check() {  # check <description> <command...>
 
 in_container() { docker exec "$NAME" "$@"; }
 
+# Assert a jq expression against a captured JSON document.
+#
+# These were `sh -c "jq -e '<expr>' <<<'$json'"`, which was wrong twice over:
+#
+#   * `<<<` is a bash here-string. `sh` is dash on Ubuntu and ash on Alpine, and
+#     neither has it -- so every such check failed with a syntax error anywhere
+#     /bin/sh is not bash. It passed on the dev box only because Arch points
+#     /bin/sh at bash, and failed 6 checks in CI. Same trap as the container's
+#     SHELL defaulting to dash.
+#   * Interpolating the document into a quoted command string corrupts it the
+#     moment it contains a single quote.
+#
+# Piping the document in avoids both, and runs jq in this bash script rather than
+# delegating to an unknown /bin/sh.
+jq_ok()  { printf '%s' "$1" | jq -e "$2" >/dev/null 2>&1; }
+jq_not() { ! jq_ok "$1" "$2"; }
+
+# Hand the simulated Supervisor mounts to the uid the daemon actually runs as.
+#
+# Supervisor gives an add-on mounts its own uid can write. Here they are created by
+# whoever runs this script -- uid 1000 on a dev box, but 1001 (`runner`) in CI --
+# while the add-on always drops to uid 1000 (PASEO_UID in ha-paseo-entrypoint).
+# When the owner is anything else, container-side writes to the mounts fail:
+# /homeassistant especially, which ha-paseo-entrypoint deliberately never chowns
+# because it is the user's real config directory. Without this the suite passes on
+# a dev box and fails 24 checks in CI, reporting harness artefacts as product
+# regressions. Ownership must not decide the result.
+#
+# Only ever called on the leaf directories that get bind-mounted, never on
+# $TESTDIR itself: this script still has to create siblings like .test/mode later,
+# and it cannot do that inside a directory it has just given away to another uid.
+own_mount() {  # own_mount <dir>...
+    local d
+    for d in "$@"; do
+        docker run --rm -v "${d}:/t" alpine:3 chown -R 1000:1000 /t >/dev/null 2>&1 \
+            || { printf 'could not chown %s to uid 1000\n' "$d" >&2; return 1; }
+    done
+}
+
 start_container() {
     cleanup
     # SYS_PTRACE is for the harness only, not the product: without it even root
@@ -85,6 +124,7 @@ cat > "${TESTDIR}/data/options.json" <<'EOF'
   "extra_apt_packages": []
 }
 EOF
+own_mount "${TESTDIR}/data" "${TESTDIR}/share" "${TESTDIR}/homeassistant"
 
 # ---------------------------------------------------------------------------
 step "1. Boot"
@@ -112,12 +152,16 @@ check "/data/home owned by uid 1000" \
 # ---------------------------------------------------------------------------
 step "3. Seeded config"
 cfg="$(in_container cat /data/home/.paseo/config.json)"
-check "worktrees.root set"        sh -c "jq -e '.worktrees.root == \"/share/paseo/workspace\"' <<<'$cfg'"
-check "relay disabled in local mode" sh -c "jq -e '.daemon.relay.enabled == false' <<<'$cfg'"
-check "no stale relay endpoint"   sh -c "jq -e '.daemon.relay | has(\"endpoint\") | not' <<<'$cfg'"
-check "app.baseUrl seeded"        sh -c "jq -e '.app.baseUrl == \"https://app.paseo.sh\"' <<<'$cfg'"
-check "app.paseo.sh CORS origin"  sh -c "jq -e '.daemon.cors.allowedOrigins | index(\"https://app.paseo.sh\")' <<<'$cfg'"
-check "provider_overrides merged" sh -c "jq -e '.agents.providers.claude.label == \"Claude (verify)\"' <<<'$cfg'"
+if ! jq -e . <<<"$cfg" >/dev/null 2>&1; then
+    bad "config.json is not valid JSON -- the checks below cannot mean anything"
+    printf '  ---- %s bytes ----\n%s\n  ----\n' "${#cfg}" "$cfg" >&2
+fi
+check "worktrees.root set"        jq_ok "$cfg" '.worktrees.root == "/share/paseo/workspace"'
+check "relay disabled in local mode" jq_ok "$cfg" '.daemon.relay.enabled == false'
+check "no stale relay endpoint"   jq_ok "$cfg" '.daemon.relay | has("endpoint") | not'
+check "app.baseUrl seeded"        jq_ok "$cfg" '.app.baseUrl == "https://app.paseo.sh"'
+check "app.paseo.sh CORS origin"  jq_ok "$cfg" '.daemon.cors.allowedOrigins | index("https://app.paseo.sh")'
+check "provider_overrides merged" jq_ok "$cfg" '.agents.providers.claude.label == "Claude (verify)"'
 
 # ---------------------------------------------------------------------------
 step "4. Tooling on PATH"
@@ -211,27 +255,37 @@ boot_with_options() {  # boot_with_options <full-json> ; echoes the seeded confi
     # config, and every assertion below would then fail for the wrong reason.
     jq -e . "${dir}/data/options.json" >/dev/null \
         || { echo "BUG in boot_with_mode: invalid options.json" >&2; return 1; }
+    own_mount "${dir}/data" "${dir}/share" || return 1
     docker run -d --name "${NAME}-mode" \
         -v "${dir}/data:/data" -v "${dir}/share:/share" "$IMAGE" >/dev/null
+    # Read the seeded config through the container, not from the host.
+    #
+    # The daemon writes config.json as uid 1000 with mode 0600, inside a 0700
+    # .paseo directory. A host-side test/cat therefore only works when the person
+    # running this happens to be uid 1000 -- on a CI runner (uid 1001) both the
+    # wait loop and the read failed, this fell through to '{}', and six checks
+    # reported a config regression that did not exist. `docker exec` runs as root
+    # and can always read it.
     local waited=0
-    while [[ ! -f "${dir}/data/home/.paseo/config.json" ]] && (( waited < 40 )); do
+    while ! docker exec "${NAME}-mode" test -f /data/home/.paseo/config.json 2>/dev/null \
+        && (( waited < 40 )); do
         sleep 2; waited=$((waited + 2))
     done
-    cat "${dir}/data/home/.paseo/config.json" 2>/dev/null || echo '{}'
+    docker exec "${NAME}-mode" cat /data/home/.paseo/config.json 2>/dev/null || echo '{}'
 }
 
 mcfg="$(boot_with_mode '"connection_mode":"custom_relay","relay_endpoint":"127.0.0.1:59999","relay_use_tls":false')"
-check "custom relay enabled"      sh -c "jq -e '.daemon.relay.enabled == true' <<<'$mcfg'"
-check "custom relay endpoint set" sh -c "jq -e '.daemon.relay.endpoint == \"127.0.0.1:59999\"' <<<'$mcfg'"
-check "custom relay useTls honoured" sh -c "jq -e '.daemon.relay.useTls == false' <<<'$mcfg'"
+check "custom relay enabled"      jq_ok "$mcfg" '.daemon.relay.enabled == true'
+check "custom relay endpoint set" jq_ok "$mcfg" '.daemon.relay.endpoint == "127.0.0.1:59999"'
+check "custom relay useTls honoured" jq_ok "$mcfg" '.daemon.relay.useTls == false'
 
 mcfg="$(boot_with_mode '"connection_mode":"custom_relay"')"
 check "empty custom endpoint falls back to local" \
-    sh -c "jq -e '.daemon.relay.enabled == false' <<<'$mcfg'"
+    jq_ok "$mcfg" '.daemon.relay.enabled == false'
 check "fallback is warned about, not silent" \
     sh -c "docker logs ${NAME}-mode 2>&1 | grep -q \"falling back to 'local'\""
 check "fallback does not reach the hosted relay" \
-    sh -c "! jq -e '.daemon.relay | has(\"endpoint\")' <<<'$mcfg'"
+    jq_not "$mcfg" '.daemon.relay | has("endpoint")'
 docker rm -f "${NAME}-mode" >/dev/null 2>&1 || true
 
 # jq's `//` treats false as absent, so every boolean defaulting to true used to
@@ -295,7 +349,7 @@ step "9. Password is optional; the bind address follows it"
 # without one the relay modes must bind loopback rather than sitting open.
 cfg9="$(boot_with_options '{"connection_mode":"relay"}')"
 check "starts with no password configured" \
-    sh -c "jq -e '.version == 1' <<<'$cfg9'"
+    jq_ok "$cfg9" '.version == 1'
 check "nothing is auto-generated" \
     sh -c "! docker logs ${NAME}-mode 2>&1 | grep -qi 'generated'"
 check "no password file is created" \
@@ -306,7 +360,7 @@ check "relay + no password binds loopback" \
 
 cfg9="$(boot_with_options '{"connection_mode":"local"}')"
 check "local + no password still starts" \
-    sh -c "jq -e '.version == 1' <<<'$cfg9'"
+    jq_ok "$cfg9" '.version == 1'
 check "local + no password warns loudly" \
     sh -c "docker logs ${NAME}-mode 2>&1 | grep -q 'NO PASSWORD SET'"
 
@@ -372,6 +426,7 @@ cat > "${shimdir}/data/options.json" <<'SHIMEOF'
           {"target":"/usr/local/bin/nope-does-not-exist","command":"echo x"},
           {"name":"../evil","command":"echo nope"}]}
 SHIMEOF
+own_mount "${shimdir}/data" "${shimdir}/share"
 docker rm -f "${NAME}-shim" >/dev/null 2>&1 || true
 docker run -d --name "${NAME}-shim" \
     -v "${shimdir}/data:/data" -v "${shimdir}/share:/share" "$IMAGE" >/dev/null
@@ -436,6 +491,7 @@ SVCEOF
 printf '#!/bin/sh\nwhile true; do echo from-dropin; sleep 3; done\n' \
     > "${svcdir}/share/paseo/services/dropin.sh"
 chmod +x "${svcdir}/share/paseo/services/dropin.sh"
+own_mount "${svcdir}/data" "${svcdir}/share"
 
 docker rm -f "${NAME}-svc" >/dev/null 2>&1 || true
 docker run -d --name "${NAME}-svc" \

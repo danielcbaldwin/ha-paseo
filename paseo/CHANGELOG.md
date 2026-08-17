@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0-2
+
+- **`scripts/verify.sh` passes regardless of who runs it.** It failed 24 of 102
+  checks in CI while passing on a dev box, which blocked the release gate added in
+  `0.4.0-1` from ever going green. Three separate assumptions, none of them about
+  the product:
+  - The bind-mounted directories were left owned by whoever ran the script. The
+    add-on drops to uid 1000, so on a CI runner (uid 1001) container-side writes
+    failed — `/homeassistant` above all, which the entrypoint deliberately never
+    chowns because it is the user's real config directory.
+  - Config assertions ran `sh -c "jq ... <<<'$json'"`. `<<<` is a bash
+    here-string; `/bin/sh` is dash on Ubuntu and ash on Alpine, so those checks
+    were a syntax error anywhere `/bin/sh` is not bash. Same trap as the
+    container's `SHELL` defaulting to dash. They also corrupted any document
+    containing a single quote.
+  - The connection-mode helper read `config.json` from the host, but the daemon
+    writes it mode `0600` as uid 1000 inside a `0700` directory — unreadable to a
+    uid-1001 harness, which silently fell back to `{}` and reported a config
+    regression that did not exist.
+- Step 3 now says so loudly when `config.json` is not valid JSON, instead of
+  reporting six unexplained failures.
+
 ## 0.4.0-1
 
 - **Paseo 0.4.0.** The base image moved from `0.3.1` to `0.4.0`

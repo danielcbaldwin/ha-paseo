@@ -68,9 +68,14 @@ jobs:
             echo "| --- | --- | --- |"
             printf '%s' "$rows"
             echo
-            echo "To update: bump the value in \`paseo/Dockerfile\` (or \`paseo/build.yaml\`"
-            echo "for Paseo itself, including the digest comment), bump \`version\` in"
-            echo "\`paseo/config.yaml\`, add a \`CHANGELOG.md\` entry, then tag the release."
+            echo "To update: bump the value in \`paseo/Dockerfile\`, add a"
+            echo "\`CHANGELOG.md\` entry, then \`./scripts/release.sh <version>\` -- a patch"
+            echo "bump for pin-only changes. Do **not** edit \`version\` in"
+            echo "\`paseo/config.yaml\`; the tag is the source of truth and CI writes it."
+            echo
+            echo "The \`paseo\` row should normally be handled by the upstream-release"
+            echo "workflow, which repins and releases on its own within six hours of a"
+            echo "new stable tag. If it appears here for long, that workflow is stuck."
             echo
             echo "_Updated automatically by the check-updates workflow._"
             echo "EOF"

@@ -23,6 +23,10 @@ port_open() { (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null && { exec 3<&- 3>&-;
 
 hdr "Add-on"
 info "version   $(jq -r '.version // "?"' /etc/ha-paseo-release 2>/dev/null || echo "?")"
+# The add-on version is the add-on's own and says nothing about Paseo, so report
+# the bundled daemon version too -- it is the first thing to check against an
+# upstream bug report.
+info "paseo     $(jq -r '.paseo // "?"' /etc/ha-paseo-release 2>/dev/null || echo "?")"
 info "listen    ${PASEO_LISTEN:-unset}"
 info "home      ${HOME:-unset}"
 if [[ -f "$OPTIONS" ]]; then

@@ -7,9 +7,11 @@
 # gosu, tini, openssh-client and procps, so this layer only adds the agent
 # CLIs, the Home Assistant tooling, and the Supervisor glue.
 
-# Overridden by build.yaml's build_from under the Home Assistant builder.
-# 0.3.1 -> sha256:1a711affc908be6d7bf314414c4dbb1b825981a9e8d02f2286e835eba43d6f75
-ARG BUILD_FROM=ghcr.io/getpaseo/paseo:0.3.1
+# Overridden by build.yaml's build_from under the Home Assistant builder. Kept in
+# step with it by .github/workflows/upstream-release.yaml, which matches on the
+# `<version> -> sha256:<digest>` shape of the comment below.
+# 0.4.0 -> sha256:593cb65b1eabee061af8f240fcb4031818e9c330fe66b584c345e3b296531b95
+ARG BUILD_FROM=ghcr.io/getpaseo/paseo:0.4.0
 FROM ${BUILD_FROM}
 
 ARG BUILD_ARCH=amd64
@@ -148,7 +150,16 @@ RUN chmod +x /usr/local/bin/ha-paseo-entrypoint \
              /usr/local/bin/ha-paseo-shims \
              /usr/local/bin/ha-paseo-doctor
 
-RUN printf '{"version":"%s"}\n' "${BUILD_VERSION}" > /etc/ha-paseo-release
+# The add-on version no longer encodes Paseo's, so the daemon version has to be
+# recorded somewhere a running container can report it -- `ha-paseo-doctor` reads
+# this. Taken from the installed package rather than from BUILD_FROM, so it states
+# what is actually in the image even if the pin and the tag ever disagree.
+RUN set -eux; \
+    paseo_version="$(jq -r '.version // "unknown"' \
+        /usr/local/lib/node_modules/@getpaseo/cli/package.json)"; \
+    printf '{"version":"%s","paseo":"%s"}\n' "${BUILD_VERSION}" "$paseo_version" \
+        > /etc/ha-paseo-release; \
+    cat /etc/ha-paseo-release
 
 LABEL \
     io.hass.name="Paseo" \

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1-1
+
+- **Paseo 0.5.1.** The base image moved from `0.4.0` to `0.5.1`
+  (`sha256:d43300569274b6d268d42b9feb38af255270ebfe7b20ea633caccc469989ab6c`). Released automatically; the add-on itself is
+  unchanged since 0.4.0-2.
+
 ## 0.4.0-2
 
 - **`scripts/verify.sh` passes regardless of who runs it.** It failed 24 of 102

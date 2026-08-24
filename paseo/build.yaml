@@ -3,7 +3,7 @@
 # rejects digest references here (build_from must be a tag), so this is a tag --
 # the digest it resolved to at the time is recorded below for audit:
 #
-#   0.5.1 -> sha256:d43300569274b6d268d42b9feb38af255270ebfe7b20ea633caccc469989ab6c
+#   0.5.2 -> sha256:85ba0c359f6922755cdba872441e2009d69e6c7bf3d56cc7664d7eaf5eb64138
 #
 # Both architectures resolve from the same multi-arch index; the builder selects
 # the right platform.
@@ -13,8 +13,8 @@
 # the digest, and cuts a release. Keep the comment's `<version> -> sha256:<digest>`
 # shape: that workflow's sed patterns match on it. See DOCS.md, "Updating Paseo".
 build_from:
-  amd64: ghcr.io/getpaseo/paseo:0.5.1
-  aarch64: ghcr.io/getpaseo/paseo:0.5.1
+  amd64: ghcr.io/getpaseo/paseo:0.5.2
+  aarch64: ghcr.io/getpaseo/paseo:0.5.2
 
 args:
   HA_CLI_VERSION: "5.3.0"

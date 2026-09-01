@@ -516,5 +516,36 @@ check "duplicate service names disambiguated" \
 docker rm -f "${NAME}-svc" >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
+# provider_overrides is authoritative: an override removed from the option is
+# removed from config.json on the next restart, WITHOUT disturbing a provider
+# added only from the Paseo app. A stale override that lingered here is how a
+# removed proxy wrapper kept hanging agents.
+step "11. provider_overrides removal is authoritative"
+
+# The boot options seeded a `claude` override (step 3); it must be recorded as
+# add-on-managed so a later removal can be reconciled.
+check "seeded override recorded in the managed sidecar" \
+    sh -c "docker exec $NAME cat /data/home/.paseo/.ha-paseo-managed-providers.json | jq -e 'index(\"claude\")'"
+
+# Simulate a provider added from the Paseo app: written straight into config.json
+# and never present in provider_overrides. Done as the paseo user so the file
+# keeps the uid-1000 ownership the daemon reads it with.
+docker exec "$NAME" gosu paseo sh -c \
+    'cd /data/home/.paseo && jq ".agents.providers.codex = {\"label\":\"app-set\"}" config.json > .c.tmp && mv .c.tmp config.json'
+
+# Clear the override from the add-on options and restart. Edited as root, exactly
+# as Supervisor owns /data/options.json in production.
+docker exec "$NAME" sh -c \
+    'jq ".provider_overrides = \"{}\"" /data/options.json > /data/.o.tmp && mv /data/.o.tmp /data/options.json'
+docker restart "$NAME" >/dev/null 2>&1 || true
+wait_healthy || true
+
+cfg="$(in_container cat /data/home/.paseo/config.json)"
+check "removed override is gone from config.json" jq_not "$cfg" '.agents.providers | has("claude")'
+check "app-set provider survives the reconcile"   jq_ok  "$cfg" '.agents.providers.codex.label == "app-set"'
+check "managed sidecar reflects the cleared option" \
+    sh -c "docker exec $NAME cat /data/home/.paseo/.ha-paseo-managed-providers.json | jq -e 'length == 0'"
+
+# ---------------------------------------------------------------------------
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

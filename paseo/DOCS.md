@@ -328,6 +328,25 @@ The value is merged recursively into `agents.providers`, so an override can add
 `env` or `label` without restating the whole provider. Invalid JSON is logged and
 ignored rather than blocking startup.
 
+**`provider_overrides` is authoritative for the providers it names.** The keys
+you list are add-on-managed: removing one from the option removes it from Paseo's
+`config.json` on the next restart, rather than leaving a stale definition behind.
+This matters most when a key pointed `command` at a proxy wrapper — a removed
+override that lingered would keep spawning the wrapper, and its startup banner
+corrupts Paseo's stdio protocol to the agent, which then hangs. Providers you add
+**only** from the Paseo app are never in the managed set, so they are left
+untouched.
+
+> **One-time migration.** The managed set is recorded from the first restart
+> after this behaviour shipped. An override you had *already* removed before then
+> is not cleaned up automatically (the add-on has no record that it owned it) —
+> delete it once by hand and restart:
+> ```bash
+> cfg=/data/home/.paseo/config.json
+> cp "$cfg" "$cfg.bak"
+> jq 'del(.agents.providers.claude)' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+> ```
+
 If you are porting a wrapper from another machine, remember to repoint whatever
 it uses as the real binary at `/usr/local/bin/claude`.
 

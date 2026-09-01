@@ -19,6 +19,10 @@
 set -euo pipefail
 
 CONFIG="${PASEO_HOME}/config.json"
+# Records which provider keys THIS add-on seeded on the previous run, so a key
+# removed from provider_overrides can be removed from config.json rather than
+# lingering forever. See the reconcile block below.
+MANAGED="${PASEO_HOME}/.ha-paseo-managed-providers.json"
 RELAY="${SEED_RELAY:-false}"
 RELAY_ENDPOINT="${SEED_RELAY_ENDPOINT:-}"
 RELAY_PUBLIC_ENDPOINT="${SEED_RELAY_PUBLIC_ENDPOINT:-}"
@@ -28,6 +32,16 @@ APP_BASE_URL="${SEED_APP_BASE_URL:-}"
 WORKTREE_ROOT="${SEED_WORKTREE_ROOT:-/share/paseo/workspace}"
 PROVIDER_OVERRIDES="${SEED_PROVIDER_OVERRIDES:-}"
 [[ -n "$PROVIDER_OVERRIDES" ]] || PROVIDER_OVERRIDES='{}'
+
+# The keys we seeded last time. A missing or corrupt sidecar is treated as an
+# empty set, which is the safe default: it never removes anything we cannot
+# prove we own. (So a stale override from before this file existed is left for a
+# one-time manual cleanup, not deleted out from under a user.)
+PREV_MANAGED='[]'
+if [[ -f "$MANAGED" ]] && jq -e 'type == "array"' "$MANAGED" >/dev/null 2>&1; then
+    PREV_MANAGED="$(jq -c '.' "$MANAGED")"
+fi
+CURR_KEYS="$(jq -c 'keys' <<<"$PROVIDER_OVERRIDES")"
 
 mkdir -p "$PASEO_HOME"
 [[ -f "$CONFIG" ]] || printf '{"version":1}\n' > "$CONFIG"
@@ -52,6 +66,7 @@ jq \
     --arg     app_base_url "$APP_BASE_URL" \
     --arg     wt "$WORKTREE_ROOT" \
     --argjson providers "$PROVIDER_OVERRIDES" \
+    --argjson prev "$PREV_MANAGED" \
     '
     .version = 1
     | .["$schema"] = "https://paseo.sh/schemas/paseo.config.v1.json"
@@ -86,15 +101,39 @@ jq \
 
     | .worktrees = ((.worktrees // {}) + {root: $wt})
 
-    # Recursive merge, so an override can add env/label to a provider without
-    # discarding the rest of its definition.
-    | if ($providers | length) > 0 then
+    # provider_overrides is AUTHORITATIVE for the keys this add-on manages.
+    #
+    #   present now  -> recursive-merged, so an override can add env/label to a
+    #                   provider without restating it, and edits made from the
+    #                   Paseo app to a managed provider survive.
+    #   managed before, gone now -> REMOVED, so clearing the option in the
+    #                   add-on config actually clears it here instead of leaving
+    #                   a stale command (e.g. an old proxy wrapper) behind.
+    #
+    # $prev is the set of keys we seeded last time; a provider added only from
+    # the Paseo app is never in it, so it is never touched.
+    | ($providers | keys)  as $curr
+    | ($prev - $curr)      as $stale
+    | if (($curr | length) > 0) or (($stale | length) > 0) then
           .agents = (.agents // {})
-        | .agents.providers = ((.agents.providers // {}) * $providers)
+        | .agents.providers = (.agents.providers // {})
+        | reduce $stale[] as $k (.; del(.agents.providers[$k]))
+        | if ($curr | length) > 0
+          then .agents.providers = (.agents.providers * $providers)
+          else . end
+        # Leave no husk when the last managed override is cleared.
+        | if (.agents.providers == {}) then (.agents |= del(.providers)) else . end
+        | if (.agents == {}) then del(.agents) else . end
       else . end
     ' "$CONFIG" > "$tmp"
 
 mv "$tmp" "$CONFIG"
 trap - EXIT
+
+# Record the keys we own now, so the next run can remove any that disappear.
+# Written only after the config is safely in place, and atomically, so an
+# interrupted run cannot claim ownership of a key it never wrote.
+mtmp="$(mktemp "${PASEO_HOME}/.managed.json.XXXXXX")"
+printf '%s\n' "$CURR_KEYS" > "$mtmp" && mv "$mtmp" "$MANAGED"
 
 printf '[ha-paseo] seeded %s\n' "$CONFIG"

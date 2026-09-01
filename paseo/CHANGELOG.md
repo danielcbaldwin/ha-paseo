@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0-2
+
+- **`provider_overrides` is now authoritative — removing an entry removes it.**
+  Seeding only ever merged overrides into Paseo's `config.json` and never took
+  them away, so clearing a provider from the add-on config left its old
+  definition in place. When that definition pointed `command` at a proxy wrapper
+  (a TeamClaude shim, say), Paseo kept spawning the wrapper after you thought you
+  had removed it; the wrapper's startup banner corrupts the stdio protocol Paseo
+  speaks to the agent, and the session hangs — while `claude` in a terminal pane
+  looks perfectly fine, because a human just reads the banner. `ha-paseo-seed-config`
+  now records the provider keys it seeds in a sidecar
+  (`${PASEO_HOME}/.ha-paseo-managed-providers.json`) and, on the next restart,
+  deletes any managed key that has disappeared from `provider_overrides`. Keys
+  present now are still recursive-merged, so adding just an `env` or `label`
+  without restating a provider keeps working, and a provider you add only from
+  the Paseo app is never in the managed set and is never touched.
+- **Migration note.** The managed set starts empty on the first restart after
+  this ships, so an override you had *already* removed beforehand is not cleaned
+  up for you — the add-on has no record that it owned it. Delete it once by hand
+  (`jq 'del(.agents.providers.<key>)' /data/home/.paseo/config.json`) and restart;
+  from then on the option is the source of truth. See DOCS.md, "Custom providers".
+
 ## 0.7.0-1
 
 - **Paseo 0.7.0.** The base image moved from `0.6.1` to `0.7.0`

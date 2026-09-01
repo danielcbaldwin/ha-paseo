@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1-1
+
+- **Paseo 0.7.1.** The base image moved from `0.7.0` to `0.7.1`
+  (`sha256:622ae1ec9d13b45073bcc0a72b286fc50ca8c6a5c5f3a31b468e67d3fcb11dac`). Released automatically; the add-on itself is
+  unchanged since 0.7.0-2.
+
 ## 0.7.0-2
 
 - **`provider_overrides` is now authoritative — removing an entry removes it.**

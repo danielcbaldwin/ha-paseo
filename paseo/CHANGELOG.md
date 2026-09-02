@@ -1,18 +1,6 @@
 # Changelog
 
-## 0.7.2-1
-
-- **Paseo 0.7.2.** The base image moved from `0.7.1` to `0.7.2`
-  (`sha256:da9286410d9dd86208755b789894534d9e200c9021bd45157557aac4146b84fb`). Released automatically; the add-on itself is
-  unchanged since 0.7.1-1.
-
-## 0.7.1-1
-
-- **Paseo 0.7.1.** The base image moved from `0.7.0` to `0.7.1`
-  (`sha256:622ae1ec9d13b45073bcc0a72b286fc50ca8c6a5c5f3a31b468e67d3fcb11dac`). Released automatically; the add-on itself is
-  unchanged since 0.7.0-2.
-
-## 0.7.0-2
+## 0.7.2-2
 
 - **Agents can now actually edit `configuration.yaml`.** The mount was always
   read/write, but the daemon and every agent run as uid 1000 while HA Core
@@ -42,6 +30,21 @@
   save, but nothing is applied until a restart/reload, and that is gated.
   Enforced, not merely requested in `CLAUDE.md`. Escape hatch for a genuine
   emergency (a flaky check): `HA_PASEO_FORCE_RESTART=1`.
+
+## 0.7.2-1
+
+- **Paseo 0.7.2.** The base image moved from `0.7.1` to `0.7.2`
+  (`sha256:da9286410d9dd86208755b789894534d9e200c9021bd45157557aac4146b84fb`). Released automatically; the add-on itself is
+  unchanged since 0.7.1-1.
+
+## 0.7.1-1
+
+- **Paseo 0.7.1.** The base image moved from `0.7.0` to `0.7.1`
+  (`sha256:622ae1ec9d13b45073bcc0a72b286fc50ca8c6a5c5f3a31b468e67d3fcb11dac`). Released automatically; the add-on itself is
+  unchanged since 0.7.0-2.
+
+## 0.7.0-2
+
 - **`provider_overrides` is now authoritative — removing an entry removes it.**
   Seeding only ever merged overrides into Paseo's `config.json` and never took
   them away, so clearing a provider from the add-on config left its old

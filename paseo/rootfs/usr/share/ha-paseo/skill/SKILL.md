@@ -33,12 +33,15 @@ hass-api GET  states/light.kitchen
 hass-api POST services/light/turn_on '{"entity_id":"light.kitchen"}'
 hass-api POST template '{"template":"{{ states(\"sun.sun\") }}"}'
 ha core check       # validate config -- ALWAYS before restarting
-ha core restart
+ha core restart     # the add-on runs `ha core check` first and refuses if it fails
 ```
 
 ## Non-negotiable rules
 
-1. `ha core check` must pass before any restart.
+1. `ha core check` must pass before any restart. The add-on **enforces** this:
+   `ha core restart` (and a restart/`reload_core_config` via `hass-api`) runs
+   `ha core check` first and refuses on failure. Do not reach for
+   `HA_PASEO_FORCE_RESTART=1` to get around a real error — fix the config.
 2. `ha backups new --name "before <change>"` before destructive work.
 3. Never hand-edit `/homeassistant/.storage/` — it is UI-owned state.
 4. Reload a single domain rather than restarting Core where possible.

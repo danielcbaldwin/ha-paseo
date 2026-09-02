@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+#
+# Safety wrapper for the Home Assistant `ha` CLI.
+#
+# The real binary is /usr/local/bin/ha; this shadows it because /usr/local/sbin
+# sits ahead of /usr/local/bin on PATH (see the image ENV and Debian's default
+# /etc/profile). Its one job: never let a configuration that fails
+# `ha core check` reach a restart.
+#
+# Since the add-on now grants the agents write access to the config YAML (the
+# ACL grant in ha-paseo-entrypoint), a bad edit followed by `ha core restart`
+# would boot Core into a broken state -- exactly what the house rules warn
+# against, now enforced rather than merely requested. Home Assistant validates
+# what is on disk, so this is the real "validate before you apply it" point:
+# there is no hook on the agent's file save, but nothing takes effect until a
+# restart/reload, and that is gated here.
+#
+# Everything except a restart passes straight through. Set
+# HA_PASEO_FORCE_RESTART=1 to bypass the gate for the rare case where the check
+# is wrong (a transient probe failure, say).
+#
+# HA_PASEO_REAL_HA overrides the real-binary path; it exists only so the test
+# harness can point the guard at a stub, since `ha core check` needs a live
+# Supervisor that verify.sh does not have.
+
+set -uo pipefail
+
+REAL="${HA_PASEO_REAL_HA:-/usr/local/bin/ha}"
+
+# True for `ha core restart` and `ha core start`, in that argument order, and
+# only when this is a real invocation rather than a help request.
+_needs_check() {
+    [[ "${1:-}" == core && ( "${2:-}" == restart || "${2:-}" == start ) ]] || return 1
+    local a
+    for a in "$@"; do
+        case "$a" in -h|--help) return 1 ;; esac
+    done
+    return 0
+}
+
+if _needs_check "$@"; then
+    action="$2"
+    if [[ "${HA_PASEO_FORCE_RESTART:-}" == "1" ]]; then
+        echo "[ha-paseo] HA_PASEO_FORCE_RESTART=1 -- skipping 'ha core check' before ${action}" >&2
+    else
+        echo "[ha-paseo] validating configuration with 'ha core check' before ${action}..." >&2
+        if ! "$REAL" core check; then
+            cat >&2 <<EOF
+
+[ha-paseo] REFUSING to ${action}: 'ha core check' failed (see above).
+[ha-paseo] Fix the errors, then try again -- this gate keeps you from booting
+[ha-paseo] Home Assistant into a broken configuration.
+[ha-paseo] To override in a genuine emergency: HA_PASEO_FORCE_RESTART=1 ha core ${action}
+EOF
+            exit 1
+        fi
+        echo "[ha-paseo] configuration valid; proceeding with ${action}." >&2
+    fi
+fi
+
+exec "$REAL" "$@"

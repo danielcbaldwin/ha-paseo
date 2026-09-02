@@ -316,11 +316,66 @@ SEED_PROVIDER_OVERRIDES="$provider_overrides" \
 gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-seed-config
 
 # ---------------------------------------------------------------------------
+# Editable Home Assistant config
+#
+# The daemon and every agent run as uid 1000, but HA Core creates
+# configuration.yaml and friends as root, so uid 1000 gets EACCES editing them.
+# We deliberately do NOT chown /homeassistant (it is the user's real config
+# directory); instead grant uid 1000 an ACL on the editable YAML surface,
+# leaving root ownership -- and therefore HA Core and backup/restore -- intact.
+#
+# Runs every boot on purpose: a tar backup/restore strips ACLs and re-roots
+# ownership, so a one-shot marker would silently stop working after a restore.
+# .storage/ is excluded -- it is UI-owned JSON state, and editing it corrupts
+# the registries.
+# ---------------------------------------------------------------------------
+grant_ha_acls() {
+    local ha=/homeassistant
+
+    if ! command -v setfacl >/dev/null 2>&1; then
+        warn "setfacl not found; agents cannot edit root-owned HA config"
+        return 0
+    fi
+
+    # Probe: without ACL support the only alternative is a chown we refuse to do,
+    # so say so loudly and carry on rather than failing the boot.
+    if ! setfacl -m "u:${PASEO_UID}:rwX" "$ha" 2>/dev/null; then
+        warn "the filesystem under ${ha} does not support ACLs -- agents cannot"
+        warn "  edit root-owned config. Mount the config partition with 'acl',"
+        warn "  or the agents will stay read-only on existing files."
+        return 0
+    fi
+    # New top-level files (e.g. an agent-created package) inherit uid-1000 write.
+    setfacl -d -m "u:${PASEO_UID}:rwX" "$ha" 2>/dev/null || true
+
+    # Recurse the editable surface: every top-level entry except UI-owned state
+    # and heavy non-config trees. Existing nested YAML (packages/*.yaml) needs
+    # the -R pass; the default ACL above only reaches files created later.
+    local entry base
+    shopt -s nullglob dotglob
+    for entry in "$ha"/*; do
+        base="$(basename "$entry")"
+        case "$base" in
+            .storage|.cloud|.git|deps|tts|backups|node_modules|www|custom_components|*.log|*.log.*)
+                continue ;;
+        esac
+        setfacl -R -m "u:${PASEO_UID}:rwX" "$entry" 2>/dev/null \
+            || warn "could not grant ACL on ${entry}"
+        [[ -d "$entry" ]] \
+            && { setfacl -R -d -m "u:${PASEO_UID}:rwX" "$entry" 2>/dev/null || true; }
+    done
+    shopt -u nullglob dotglob
+
+    log "granted uid ${PASEO_UID} write access to editable HA config via ACLs (.storage excluded)"
+}
+
+# ---------------------------------------------------------------------------
 # Home Assistant wiring for the agents
 # ---------------------------------------------------------------------------
 if [[ "$expose_ha_config" == "true" ]]; then
     if [[ -d /homeassistant ]]; then
         log "Home Assistant config is mapped at /homeassistant"
+        grant_ha_acls
         HA_MCP_URL="$ha_mcp_url" \
         gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/ha-paseo-postboot seed-ha-config \
             || warn "failed to seed Home Assistant agent config"

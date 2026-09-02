@@ -4,6 +4,10 @@ description: Validate the Home Assistant configuration and explain any errors
 
 Run `ha core check`.
 
+Note: the add-on already gates restarts on this — `ha core restart` runs
+`ha core check` first and refuses if it fails — so running it yourself here is
+about *understanding* a failure before you get blocked by it, not a formality.
+
 If it passes, say so plainly and stop — do not restart Core unless I asked you
 to.
 

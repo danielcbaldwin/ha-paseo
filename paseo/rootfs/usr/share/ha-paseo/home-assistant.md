@@ -52,7 +52,12 @@ also available. `hass-api` works whether or not it is.
 ## Rules
 
 1. **Validate before restarting.** Run `ha core check` after editing any YAML.
-   Never restart Core on a configuration that has not passed.
+   Never restart Core on a configuration that has not passed. This is
+   **enforced**, not just asked for: `ha core restart` (and a restart or
+   `reload_core_config` issued through `hass-api`) runs `ha core check` first and
+   refuses if it fails. There is an escape hatch — `HA_PASEO_FORCE_RESTART=1` —
+   but it exists only for a genuine emergency where the check itself is wrong;
+   never use it to paper over a real error.
 2. **Back up before destructive work.** `ha backups new --name "before <change>"`
    takes seconds and has saved entire weekends.
 3. **Never hand-edit `.storage/`.** That directory is owned by the UI and is

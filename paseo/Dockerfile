@@ -16,8 +16,8 @@ FROM ${BUILD_FROM}
 
 ARG BUILD_ARCH=amd64
 ARG BUILD_VERSION=dev
-ARG HA_CLI_VERSION=5.3.0
-ARG GH_CLI_VERSION=2.97.0
+ARG HA_CLI_VERSION=5.4.0
+ARG GH_CLI_VERSION=2.98.0
 
 # Agent CLI versions are pinned so a rebuild of a given add-on version always
 # produces the same image. Unpinned `npm install -g` would silently ship
@@ -25,11 +25,11 @@ ARG GH_CLI_VERSION=2.97.0
 # different things on different days. Bumped deliberately; see DOCS.md,
 # "Keeping things up to date". The check-updates workflow files an issue when
 # any of these fall behind.
-ARG CLAUDE_CODE_VERSION=2.1.227
-ARG CODEX_VERSION=0.147.0
-ARG OPENCODE_VERSION=1.18.16
-ARG COPILOT_VERSION=1.0.79
-ARG GEMINI_CLI_VERSION=0.54.4
+ARG CLAUDE_CODE_VERSION=2.1.251
+ARG CODEX_VERSION=0.151.0
+ARG OPENCODE_VERSION=1.18.25
+ARG COPILOT_VERSION=1.0.82
+ARG GEMINI_CLI_VERSION=0.57.0
 
 # Upstream's entrypoint owns the privilege drop to uid 1000, so this image
 # must stay root at the end. See the Docker page of the Paseo docs.

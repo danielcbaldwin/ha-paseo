@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2-3
+
+- **Agent CLIs and tooling refreshed to the latest upstream pins** (issue #3):
+  `@anthropic-ai/claude-code` 2.1.227 → 2.1.251, `@openai/codex` 0.147.0 →
+  0.151.0, `opencode-ai` 1.18.16 → 1.18.25, `@github/copilot` 1.0.79 → 1.0.82,
+  `@google/gemini-cli` 0.54.4 → 0.57.0, `home-assistant/cli` 5.3.0 → 5.4.0, and
+  `gh` 2.97.0 → 2.98.0. Pin-only; the add-on itself is unchanged since 0.7.2-2.
+
 ## 0.7.2-2
 
 - **Agents can now actually edit `configuration.yaml`.** The mount was always

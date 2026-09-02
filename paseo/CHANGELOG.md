@@ -14,6 +14,34 @@
 
 ## 0.7.0-2
 
+- **Agents can now actually edit `configuration.yaml`.** The mount was always
+  read/write, but the daemon and every agent run as uid 1000 while HA Core
+  creates the config files as root, so an in-place edit failed with `EACCES` —
+  seeding new files (`.mcp.json`, `CLAUDE.md`) worked because those are born
+  owned by 1000, which is exactly why editing existing files did not. The
+  entrypoint deliberately never chowns `/homeassistant` (it is your real config
+  directory), so instead it now grants uid 1000 an **ACL** (`u:1000:rwX`, plus a
+  default ACL for inheritance) over the editable YAML surface, leaving root
+  ownership — and therefore HA Core and backup/restore — untouched. `.storage/`
+  is excluded (UI-owned state; editing it corrupts the registries), as are heavy
+  non-config trees (`custom_components/`, `www/`, `deps/`, `tts/`, `.git/`,
+  backups and logs). The grant runs on **every** boot on purpose: a tar
+  backup/restore strips ACLs and re-roots ownership, so a one-shot marker would
+  silently stop working after a restore. Requires ACL support on the config
+  filesystem (HAOS ext4 has it); if `setfacl` cannot apply, the add-on logs a
+  clear warning and agents stay read-only on existing files rather than failing
+  the boot. Adds the `acl` package.
+- **Restarts are gated on `ha core check`.** Now that agents can genuinely edit
+  the config, a bad edit followed by `ha core restart` would boot Core into a
+  broken state. A guard wrapper at `/usr/local/sbin/ha` (which shadows the real
+  binary via PATH order, without touching it) runs `ha core check` before any
+  `core restart`/`core start` and refuses if it fails; `hass-api` applies the
+  same gate to `services/homeassistant/restart`, `reload_core_config` and
+  `reload_all`. Home Assistant validates the config on disk, so this is the real
+  "validate before it takes effect" point — there is no hook on an agent's file
+  save, but nothing is applied until a restart/reload, and that is gated.
+  Enforced, not merely requested in `CLAUDE.md`. Escape hatch for a genuine
+  emergency (a flaky check): `HA_PASEO_FORCE_RESTART=1`.
 - **`provider_overrides` is now authoritative — removing an entry removes it.**
   Seeding only ever merged overrides into Paseo's `config.json` and never took
   them away, so clearing a provider from the add-on config left its old

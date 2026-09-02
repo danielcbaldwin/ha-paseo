@@ -124,6 +124,14 @@ cat > "${TESTDIR}/data/options.json" <<'EOF'
   "extra_apt_packages": []
 }
 EOF
+# Fixtures for the ACL grant: a pre-existing config file and UI-owned state.
+# own_mount below chowns the tree to uid 1000 (a CI-harness necessity), so these
+# do not start root-owned -- but the grant still stamps a named user:1000 ACL on
+# the editable surface and skips .storage, which is exactly what step 6b asserts.
+mkdir -p "${TESTDIR}/homeassistant/.storage"
+printf '# verify fixture\n' > "${TESTDIR}/homeassistant/configuration.yaml"
+printf '{}\n' > "${TESTDIR}/homeassistant/.storage/core.config_entries"
+
 own_mount "${TESTDIR}/data" "${TESTDIR}/share" "${TESTDIR}/homeassistant"
 
 # ---------------------------------------------------------------------------
@@ -165,7 +173,7 @@ check "provider_overrides merged" jq_ok "$cfg" '.agents.providers.claude.label =
 
 # ---------------------------------------------------------------------------
 step "4. Tooling on PATH"
-for bin in claude codex opencode gemini copilot ha gh git jq rg python3 hass-api update-agents; do
+for bin in claude codex opencode gemini copilot ha gh git jq rg python3 hass-api update-agents setfacl; do
     check "$bin" in_container sh -lc "command -v $bin"
 done
 
@@ -234,6 +242,62 @@ check "agent-login detects an API key" \
 
 check "update-agents status runs" \
     sh -c "docker exec $NAME gosu paseo update-agents status | grep -q gemini"
+
+# ---------------------------------------------------------------------------
+# The mount is read/write, but agents run as uid 1000 while HA Core owns the
+# config as root -- so without an ACL an in-place edit fails with EACCES. The
+# entrypoint grants uid 1000 an ACL on the editable surface and skips .storage.
+#
+# ACLs are a filesystem feature; if the host backing this bind mount lacks them
+# the grant logs a warning and no-ops -- an environment limit, not a product bug.
+# So probe first and only assert the grant when ACLs are actually supported
+# (mirrors own_mount: the environment must not decide the result).
+step "6b. Editable config surface (ACLs)"
+# getfacl resolves uid 1000 to the `paseo` username unless -n (numeric) is given.
+if docker exec "$NAME" sh -c \
+    'f=/homeassistant/.aclprobe; : > "$f"; setfacl -m u:1000:r "$f" 2>/dev/null \
+       && getfacl -cn "$f" 2>/dev/null | grep -q "^user:1000:"; rc=$?; rm -f "$f"; exit $rc'; then
+    check "config root carries a uid-1000 ACL" \
+        sh -c "docker exec $NAME getfacl -cn /homeassistant 2>/dev/null | grep -q '^user:1000:'"
+    check "config root sets a default ACL for inheritance" \
+        sh -c "docker exec $NAME getfacl -cn /homeassistant 2>/dev/null | grep -q '^default:user:1000:'"
+    check "configuration.yaml is writable by uid 1000" \
+        sh -c "docker exec $NAME getfacl -cn /homeassistant/configuration.yaml 2>/dev/null | grep -q '^user:1000:'"
+    check ".storage is excluded from the grant" \
+        sh -c "! docker exec $NAME getfacl -cn /homeassistant/.storage 2>/dev/null | grep -q '^user:1000:'"
+    check "the ACL grant is logged" \
+        sh -c "docker logs $NAME 2>&1 | grep -q 'write access to editable HA config'"
+else
+    ok "ACLs unsupported on this filesystem -- skipping grant assertions (env limit)"
+    check "the add-on warned that ACLs are unavailable" \
+        sh -c "docker logs $NAME 2>&1 | grep -q 'does not support ACLs'"
+fi
+
+# ---------------------------------------------------------------------------
+# A restart must be gated on `ha core check` so a broken edit cannot boot Core.
+# The real check needs a live Supervisor this harness has none of, so drive the
+# guard against a stub via HA_PASEO_REAL_HA (a test-only seam) whose `core check`
+# exit code is controlled by STUB_CHECK_RC.
+step "6c. Restart is gated on ha core check"
+check "the ha guard shadows the real binary" \
+    sh -c "[ \"\$(docker exec $NAME sh -lc 'command -v ha')\" = /usr/local/sbin/ha ]"
+
+docker exec "$NAME" sh -c 'cat > /tmp/stub-ha <<"EOS"
+#!/bin/sh
+if [ "$1" = core ] && [ "$2" = check ]; then exit "${STUB_CHECK_RC:-0}"; fi
+echo "RAN: $*"
+EOS
+chmod +x /tmp/stub-ha'
+
+check "restart proceeds when the config validates" \
+    sh -c "docker exec -e HA_PASEO_REAL_HA=/tmp/stub-ha -e STUB_CHECK_RC=0 $NAME ha core restart 2>/dev/null | grep -q '^RAN: core restart'"
+check "restart is refused when the config fails" \
+    sh -c "! docker exec -e HA_PASEO_REAL_HA=/tmp/stub-ha -e STUB_CHECK_RC=1 $NAME ha core restart 2>/dev/null | grep -q '^RAN: core restart'"
+check "HA_PASEO_FORCE_RESTART bypasses the gate" \
+    sh -c "docker exec -e HA_PASEO_REAL_HA=/tmp/stub-ha -e STUB_CHECK_RC=1 -e HA_PASEO_FORCE_RESTART=1 $NAME ha core restart 2>/dev/null | grep -q '^RAN: core restart'"
+check "non-restart commands pass straight through" \
+    sh -c "docker exec -e HA_PASEO_REAL_HA=/tmp/stub-ha $NAME ha core logs 2>/dev/null | grep -q '^RAN: core logs'"
+docker exec "$NAME" rm -f /tmp/stub-ha >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 # Connection modes. Deliberately never exercises `relay`: that would register

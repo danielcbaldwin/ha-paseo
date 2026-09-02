@@ -42,6 +42,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
+        acl \
         ca-certificates \
         jq \
         less \
@@ -139,7 +140,8 @@ RUN usermod --home /data/home paseo
 RUN rm -rf /home/paseo/..?* /home/paseo/.[!.]* /home/paseo/*
 
 COPY rootfs/ /
-RUN chmod +x /usr/local/bin/ha-paseo-entrypoint \
+RUN chmod +x /usr/local/sbin/ha \
+             /usr/local/bin/ha-paseo-entrypoint \
              /usr/local/bin/ha-paseo-seed-config \
              /usr/local/bin/ha-paseo-postboot \
              /usr/local/bin/hass-api \

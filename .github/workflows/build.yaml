@@ -20,7 +20,7 @@ jobs:
       - name: Shellcheck the entrypoint scripts
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck --severity=warning paseo/rootfs/usr/local/bin/*
+          shellcheck --severity=warning paseo/rootfs/usr/local/bin/* paseo/rootfs/usr/local/sbin/*
 
       - name: Validate the add-on manifest
         uses: frenck/action-addon-linter@v2

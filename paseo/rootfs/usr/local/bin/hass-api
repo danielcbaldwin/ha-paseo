@@ -35,6 +35,27 @@ method="$1"
 path="${2#/}"
 body="${3:-}"
 
+# Gate: applying a YAML change through the REST API must not push Core into a
+# broken configuration. `ha core restart` is guarded by the /usr/local/sbin/ha
+# wrapper, but a restart or core-config reload can also be triggered here, so
+# validate first. Override with HA_PASEO_FORCE_RESTART=1 for a genuine emergency.
+if [[ "${method^^}" == "POST" ]]; then
+    case "$path" in
+        services/homeassistant/restart | \
+        services/homeassistant/reload_core_config | \
+        services/homeassistant/reload_all)
+            if [[ "${HA_PASEO_FORCE_RESTART:-}" != "1" ]]; then
+                echo "hass-api: validating configuration with 'ha core check' before ${path}..." >&2
+                if ! ha core check >&2; then
+                    echo "hass-api: REFUSING ${path}: 'ha core check' failed (see above)." >&2
+                    echo "hass-api: fix the config, or override with HA_PASEO_FORCE_RESTART=1." >&2
+                    exit 1
+                fi
+            fi
+            ;;
+    esac
+fi
+
 args=(
     --fail-with-body
     --silent

@@ -235,6 +235,16 @@ With `expose_ha_config` on, the add-on:
 
 - maps your config to **`/homeassistant`** (read/write) and registers it as a
   Paseo workspace;
+- grants the agents (uid 1000) write access to the **editable YAML surface** via
+  an ACL. The mount is read/write, but HA Core owns `configuration.yaml` and
+  friends as root, so without this an in-place edit fails with `EACCES`. The
+  add-on does **not** chown your config directory; it sets `u:1000:rwX` (plus a
+  default ACL for inheritance) on the config files and include dirs, leaving root
+  ownership intact. `.storage/` is excluded, as are heavy non-config trees
+  (`custom_components/`, `www/`, `deps/`, `tts/`, backups, logs). It re-applies on
+  every boot because a backup/restore strips ACLs. This needs ACL support on the
+  config filesystem (HAOS ext4 has it); if it is unavailable the **Log** says so
+  and agents stay read-only on existing files;
 - writes `/homeassistant/CLAUDE.md` with house rules (validate with
   `ha core check`, never hand-edit `.storage/`);
 - writes `/homeassistant/.mcp.json` pointing Claude Code at Home Assistant's MCP
@@ -248,7 +258,12 @@ are never overwritten.
 ### Tools available to agents
 
 - **`ha`** — the Supervisor CLI: `ha core check`, `ha core logs`,
-  `ha addons list`, `ha backups new`.
+  `ha addons list`, `ha backups new`. `ha core restart` (and `ha core start`) is
+  **gated**: the add-on runs `ha core check` first and refuses to restart on a
+  configuration that fails, so a bad edit cannot boot Core into a broken state.
+  The same gate covers a restart or `reload_core_config` issued through
+  `hass-api`. Override only in a genuine emergency with
+  `HA_PASEO_FORCE_RESTART=1`.
 - **`hass-api`** — an authenticated wrapper over the Core REST API that needs no
   MCP setup and works from every provider:
 
@@ -546,7 +561,11 @@ Read this bit.
 
 With the default options this add-on gives a language model:
 
-- **read/write on your Home Assistant configuration** (`/homeassistant`),
+- **read/write on your Home Assistant configuration** (`/homeassistant`) — and
+  as of 0.7.0-2 that write is real: an ACL lets the agents edit the YAML files HA
+  Core owns as root, where before they could only read existing files and create
+  new ones. `.storage/` is deliberately left out of the grant, but everything
+  that shapes your config is now genuinely editable,
 - **a Supervisor token with `manager` role** — enough to restart Core, and to
   install, reconfigure or remove other add-ons,
 - **the Core REST API**, so it can call any service on any entity.
@@ -556,6 +575,11 @@ That is the point of the add-on, and it is genuinely dangerous. What is in place
 - The password is mandatory; the add-on will not start without one.
 - Agents run with Paseo's normal permission prompts. Nothing here passes
   `--dangerously-skip-permissions`, and you should not add it.
+- Restarts are validated: `ha core restart` runs `ha core check` first and
+  refuses on failure (as does a restart/`reload_core_config` through `hass-api`),
+  so a broken edit cannot be applied to the running instance. Home Assistant
+  validates the config on disk, so this gate sits at the point a change takes
+  effect — there is no equivalent hook on an agent's individual file save.
 - The seeded `CLAUDE.md` requires `ha core check` before any restart.
 
 What is on you:

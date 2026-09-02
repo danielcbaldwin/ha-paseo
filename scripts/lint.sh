@@ -8,6 +8,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 mapfile -t files < <(
     find paseo/rootfs/usr/local/bin -type f -printf '/mnt/%p\n'
+    find paseo/rootfs/usr/local/sbin -type f -printf '/mnt/%p\n'
     find paseo/rootfs/etc/profile.d -type f -name '*.sh' -printf '/mnt/%p\n'
     find scripts -type f -name '*.sh' -printf '/mnt/%p\n'
 )

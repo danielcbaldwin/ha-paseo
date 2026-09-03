@@ -1,6 +1,6 @@
 ---
 name: Paseo
-version: "0.7.2-3"
+version: "0.7.2-4"
 slug: paseo
 description: >-
   Self-hosted orchestration for Claude Code, Codex, OpenCode and Copilot,

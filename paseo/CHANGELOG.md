@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.2-4
+
+- **YAML tooling for the agents.** Editing Home Assistant config is most of what
+  runs in here, so the image now ships **PyYAML** (`python3-yaml`) and
+  **ruamel.yaml** (`python3-ruamel.yaml`, comment- and format-preserving on a
+  round-trip edit), **`yamllint`** to validate a file before `ha core check`, and
+  **`moreutils`** for `sponge` (in-place pipe edits without the temp-file
+  shuffle). All from apt — the system Python is externally managed — so no
+  `extra_apt_packages` is needed for the common case.
+- **Network utilities for diagnosing connectivity.** Alongside the `curl` that
+  upstream already ships, the image now has `dig`/`nslookup`
+  (`bind9-dnsutils`), `ping` (`iputils-ping`), `nc` (`netcat-openbsd`),
+  `traceroute`, and `ss`/`ip` (`iproute2`) — enough to work out why an agent
+  can't reach HA Core, an MCP server or a webhook target.
+
 ## 0.7.2-3
 
 - **Agent CLIs and tooling refreshed to the latest upstream pins** (issue #3):

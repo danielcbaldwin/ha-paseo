@@ -38,20 +38,44 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # ---------------------------------------------------------------------------
 # OS packages. bash/curl/git/gosu/tini/openssh-client/procps come from upstream.
+#
+# The YAML tooling earns its place: this add-on's whole job is agents editing
+# Home Assistant config. python3-yaml (PyYAML) is the baseline `import yaml`;
+# python3-ruamel.yaml round-trips comments and formatting so an in-place edit of
+# configuration.yaml does not flatten a hand-written file; yamllint catches the
+# exact traps the agent guide warns about (unquoted on/off, indentation); and
+# moreutils brings `sponge`, which replaces the read-tmp-mv dance for pipe edits.
+# Installed via apt, not pip, because the system Python is externally managed and
+# these all ship as Debian packages.
+#
+# Network utilities are for diagnosing why the agent can't reach something -- HA
+# Core, an MCP server, a webhook target. Upstream already ships curl; this adds
+# DNS (bind9-dnsutils: dig, nslookup), reachability (iputils-ping), port probing
+# (netcat-openbsd: nc), path tracing (traceroute) and socket/route inspection
+# (iproute2: ss, ip).
 # ---------------------------------------------------------------------------
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         acl \
+        bind9-dnsutils \
         ca-certificates \
+        iproute2 \
+        iputils-ping \
         jq \
         less \
+        moreutils \
         nano \
+        netcat-openbsd \
         python3 \
+        python3-ruamel.yaml \
         python3-venv \
+        python3-yaml \
         rsync \
         ripgrep \
+        traceroute \
         unzip \
+        yamllint \
         bash-completion \
         fzf \
         tree \

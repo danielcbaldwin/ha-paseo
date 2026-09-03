@@ -803,6 +803,18 @@ Also installed for interactive use: `bash-completion`, `fzf` (Ctrl-R over
 history), `tree`, `htop`, plus the `ripgrep`, `jq`, `less` and `nano` that were
 already there. Add more with `extra_apt_packages`.
 
+For working with YAML — which is most of what an agent touches here — the image
+ships **PyYAML** and **ruamel.yaml** (`import yaml` / `from ruamel.yaml import
+YAML`; the latter preserves comments and formatting on a round-trip edit),
+**`yamllint`** for validating a file before `ha core check`, and **`sponge`**
+(from `moreutils`) so an in-place edit is `filter file | sponge file` rather than
+a temp-file shuffle.
+
+For network debugging — when an agent can't reach HA Core, an MCP server or a
+webhook — the image has `curl` (from upstream) plus `dig`/`nslookup`
+(`bind9-dnsutils`), `ping` (`iputils-ping`), `nc` (`netcat-openbsd`),
+`traceroute`, and `ss`/`ip` (`iproute2`).
+
 Completion works through bash-completion's lazy loader, so `git <Tab>`,
 `apt <Tab>` and `ssh <Tab>` all resolve on first use.
 

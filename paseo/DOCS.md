@@ -807,8 +807,13 @@ For working with YAML — which is most of what an agent touches here — the im
 ships **PyYAML** and **ruamel.yaml** (`import yaml` / `from ruamel.yaml import
 YAML`; the latter preserves comments and formatting on a round-trip edit),
 **`yamllint`** for validating a file before `ha core check`, and **`sponge`**
-(from `moreutils`) so an in-place edit is `filter file | sponge file` rather than
+(from `moreutils`) so an in-place edit is `yq -y … file | sponge file` rather than
 a temp-file shuffle.
+
+For JSON, **`jq`** queries and transforms it, **`yq`** applies the same jq syntax
+to YAML and converts between YAML and JSON (so an HA config can be filtered or
+reshaped), and **`jo`** builds JSON from shell args — handy for a `hass-api POST`
+body, e.g. `hass-api POST services/light/turn_on "$(jo entity_id=light.kitchen)"`.
 
 For network debugging — when an agent can't reach HA Core, an MCP server or a
 webhook — the image has `curl` (from upstream) plus `dig`/`nslookup`

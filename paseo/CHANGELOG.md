@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.2-5
+
+- **JSON tooling.** Alongside `jq` (already in the image), the build now adds
+  **`yq`** — jq syntax over YAML, and YAML↔JSON conversion, which fits an add-on
+  whose editable surface is HA YAML — and **`jo`**, which builds JSON from shell
+  args (handy for a `hass-api POST` body).
+
 ## 0.7.2-4
 
 - **YAML tooling for the agents.** Editing Home Assistant config is most of what

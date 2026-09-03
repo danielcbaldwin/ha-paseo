@@ -48,6 +48,11 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Installed via apt, not pip, because the system Python is externally managed and
 # these all ship as Debian packages.
 #
+# JSON is the other half of the same job. jq (already present) queries JSON; yq
+# applies jq syntax to YAML and converts between the two, so an HA config can be
+# filtered or reshaped in place; jo builds JSON payloads from shell args, which
+# is exactly what `hass-api POST` wants.
+#
 # Network utilities are for diagnosing why the agent can't reach something -- HA
 # Core, an MCP server, a webhook target. Upstream already ships curl; this adds
 # DNS (bind9-dnsutils: dig, nslookup), reachability (iputils-ping), port probing
@@ -62,6 +67,7 @@ RUN set -eux; \
         ca-certificates \
         iproute2 \
         iputils-ping \
+        jo \
         jq \
         less \
         moreutils \
@@ -76,6 +82,7 @@ RUN set -eux; \
         traceroute \
         unzip \
         yamllint \
+        yq \
         bash-completion \
         fzf \
         tree \

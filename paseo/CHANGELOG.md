@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0-1
+
+- **Paseo 0.8.0.** The base image moved from `0.7.2` to `0.8.0`
+  (`sha256:5518da7cdd35f132e8a944c35e509c677a90a8f3ec8a78df98f7fb5fd5e2c6c3`). Released automatically; the add-on itself is
+  unchanged since 0.7.2-5.
+
 ## 0.7.2-5
 
 - **JSON tooling.** Alongside `jq` (already in the image), the build now adds

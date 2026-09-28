@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0-1
+
+- **Paseo 0.10.0.** The base image moved from `0.9.2` to `0.10.0`
+  (`sha256:0bb05e80feafe27574ae4e068622fc86ef0a112d805945c6d67a79341d247952`). Released automatically; the add-on itself is
+  unchanged since 0.9.2-1.
+
 ## 0.9.2-1
 
 - **Paseo 0.9.2.** The base image moved from `0.9.1` to `0.9.2`

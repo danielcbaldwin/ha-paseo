@@ -27,9 +27,46 @@ jobs:
         with:
           path: ./paseo
 
+  # The image installs the newest release of every agent CLI and tool, so
+  # "latest" is resolved here, once, and handed to both architecture legs. Left
+  # to each leg, a release landing between the two would ship amd64 and aarch64
+  # images of the same add-on version with different agent versions.
+  resolve:
+    name: Resolve latest versions
+    runs-on: ubuntu-latest
+    outputs:
+      claude: ${{ steps.v.outputs.claude }}
+      codex: ${{ steps.v.outputs.codex }}
+      opencode: ${{ steps.v.outputs.opencode }}
+      copilot: ${{ steps.v.outputs.copilot }}
+      gemini: ${{ steps.v.outputs.gemini }}
+      ha_cli: ${{ steps.v.outputs.ha_cli }}
+      gh_cli: ${{ steps.v.outputs.gh_cli }}
+    steps:
+      - name: Resolve
+        id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Fail rather than fall back: a blank here would reach the Dockerfile
+          # as an empty version and break the install in a less obvious place.
+          put() {
+            [[ -n "$2" && "$2" != "null" ]] || { echo "::error::could not resolve $1"; exit 1; }
+            echo "$1=$2" >> "$GITHUB_OUTPUT"
+            echo "$1 $2"
+          }
+          put claude   "$(npm view @anthropic-ai/claude-code version)"
+          put codex    "$(npm view @openai/codex version)"
+          put opencode "$(npm view opencode-ai version)"
+          put copilot  "$(npm view @github/copilot version)"
+          put gemini   "$(npm view @google/gemini-cli version)"
+          put ha_cli   "$(gh api repos/home-assistant/cli/releases/latest --jq .tag_name)"
+          put gh_cli   "$(gh api repos/cli/cli/releases/latest --jq '.tag_name | ltrimstr("v")')"
+
   build:
     name: Build ${{ matrix.arch }}
-    needs: lint
+    needs: [lint, resolve]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -90,6 +127,13 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           ARCH: ${{ matrix.arch }}
           PUBLISH: ${{ steps.meta.outputs.publish }}
+          CLAUDE_CODE_VERSION: ${{ needs.resolve.outputs.claude }}
+          CODEX_VERSION: ${{ needs.resolve.outputs.codex }}
+          OPENCODE_VERSION: ${{ needs.resolve.outputs.opencode }}
+          COPILOT_VERSION: ${{ needs.resolve.outputs.copilot }}
+          GEMINI_CLI_VERSION: ${{ needs.resolve.outputs.gemini }}
+          HA_CLI_VERSION: ${{ needs.resolve.outputs.ha_cli }}
+          GH_CLI_VERSION: ${{ needs.resolve.outputs.gh_cli }}
         run: |
           set -euo pipefail
           case "$ARCH" in
@@ -103,10 +147,22 @@ jobs:
           url="$(yq -r '.url' paseo/config.yaml)"
           image="ghcr.io/danielcbaldwin/ha-paseo-${ARCH}"
 
+          # --pull and --no-cache so every build takes the current base image
+          # digest and re-runs apt and npm, rather than reusing a layer that
+          # froze whatever was newest the last time it was built.
           args=(
             --platform "$platform"
+            --pull
+            --no-cache
             --build-arg "BUILD_ARCH=${ARCH}"
             --build-arg "BUILD_VERSION=${VERSION}"
+            --build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}"
+            --build-arg "CODEX_VERSION=${CODEX_VERSION}"
+            --build-arg "OPENCODE_VERSION=${OPENCODE_VERSION}"
+            --build-arg "COPILOT_VERSION=${COPILOT_VERSION}"
+            --build-arg "GEMINI_CLI_VERSION=${GEMINI_CLI_VERSION}"
+            --build-arg "HA_CLI_VERSION=${HA_CLI_VERSION}"
+            --build-arg "GH_CLI_VERSION=${GH_CLI_VERSION}"
             --label "io.hass.name=${name}"
             --label "io.hass.description=${description}"
             --label "io.hass.url=${url}"

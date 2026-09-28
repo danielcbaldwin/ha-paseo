@@ -16,20 +16,21 @@ FROM ${BUILD_FROM}
 
 ARG BUILD_ARCH=amd64
 ARG BUILD_VERSION=dev
-ARG HA_CLI_VERSION=5.4.0
-ARG GH_CLI_VERSION=2.98.0
 
-# Agent CLI versions are pinned so a rebuild of a given add-on version always
-# produces the same image. Unpinned `npm install -g` would silently ship
-# whatever happened to be latest on build day, which makes "0.3.1-1" mean
-# different things on different days. Bumped deliberately; see DOCS.md,
-# "Keeping things up to date". The check-updates workflow files an issue when
-# any of these fall behind.
-ARG CLAUDE_CODE_VERSION=2.1.251
-ARG CODEX_VERSION=0.151.0
-ARG OPENCODE_VERSION=1.18.25
-ARG COPILOT_VERSION=1.0.82
-ARG GEMINI_CLI_VERSION=0.57.0
+# Everything below the base image tracks upstream: each build installs the newest
+# release of the agent CLIs, the HA and GitHub CLIs, and the Debian packages. CI
+# resolves "latest" to exact versions once per release and passes them in, so
+# both architectures get identical versions; a local build resolves "latest"
+# itself. A published image is immutable, and what went into it is recorded in
+# /etc/ha-paseo-release (see `ha-paseo-doctor`). Any of these can still be set to
+# an exact version with --build-arg.
+ARG HA_CLI_VERSION=latest
+ARG GH_CLI_VERSION=latest
+ARG CLAUDE_CODE_VERSION=latest
+ARG CODEX_VERSION=latest
+ARG OPENCODE_VERSION=latest
+ARG COPILOT_VERSION=latest
+ARG GEMINI_CLI_VERSION=latest
 
 # Upstream's entrypoint owns the privilege drop to uid 1000, so this image
 # must stay root at the end. See the Docker page of the Paseo docs.
@@ -58,10 +59,14 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # DNS (bind9-dnsutils: dig, nslookup), reachability (iputils-ping), port probing
 # (netcat-openbsd: nc), path tracing (traceroute) and socket/route inspection
 # (iproute2: ss, ip).
+#
+# `apt-get upgrade` first, so the upstream base's own packages pick up Debian
+# security updates on every build rather than only when upstream rebuilds.
 # ---------------------------------------------------------------------------
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         acl \
         bind9-dnsutils \
         ca-certificates \
@@ -92,6 +97,9 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 # Home Assistant CLI and GitHub CLI, selected from the Supervisor build arch.
 # home-assistant/cli publishes assets named exactly ha_amd64 / ha_aarch64.
+#
+# "latest" is resolved from the /releases/latest redirect rather than the API,
+# which needs no token and is not rate limited the way api.github.com is.
 # ---------------------------------------------------------------------------
 RUN set -eux; \
     case "${BUILD_ARCH}" in \
@@ -99,15 +107,25 @@ RUN set -eux; \
         aarch64) ha_asset="ha_aarch64"; gh_arch="arm64" ;; \
         *) echo "unsupported BUILD_ARCH: ${BUILD_ARCH}" >&2; exit 1 ;; \
     esac; \
+    latest_tag() { \
+        curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$1/releases/latest" \
+            | sed 's|.*/tag/||'; \
+    }; \
+    ha_version="${HA_CLI_VERSION}"; \
+    [ "$ha_version" != latest ] || ha_version="$(latest_tag home-assistant/cli)"; \
+    gh_version="${GH_CLI_VERSION#v}"; \
+    [ "$gh_version" != latest ] || gh_version="$(latest_tag cli/cli | sed 's/^v//')"; \
     curl -fsSL -o /usr/local/bin/ha \
-        "https://github.com/home-assistant/cli/releases/download/${HA_CLI_VERSION}/${ha_asset}"; \
+        "https://github.com/home-assistant/cli/releases/download/${ha_version}/${ha_asset}"; \
     chmod +x /usr/local/bin/ha; \
     curl -fsSL -o /tmp/gh.deb \
-        "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gh_arch}.deb"; \
+        "https://github.com/cli/cli/releases/download/v${gh_version}/gh_${gh_version}_linux_${gh_arch}.deb"; \
     dpkg -i /tmp/gh.deb; \
     rm -f /tmp/gh.deb; \
     ha --help >/dev/null; \
-    gh --version
+    gh --version; \
+    jq -n --arg ha "$ha_version" --arg gh "$gh_version" '{ha_cli: $ha, gh: $gh}' \
+        > /etc/ha-paseo-tools.json
 
 # ---------------------------------------------------------------------------
 # Agent CLIs.
@@ -186,12 +204,23 @@ RUN chmod +x /usr/local/sbin/ha \
 # The add-on version no longer encodes Paseo's, so the daemon version has to be
 # recorded somewhere a running container can report it -- `ha-paseo-doctor` reads
 # this. Taken from the installed package rather than from BUILD_FROM, so it states
-# what is actually in the image even if the pin and the tag ever disagree.
+# what is actually in the image even if the pin and the tag ever disagree. The
+# agent and tool versions are recorded the same way, since the build resolves
+# them to whatever was newest that day.
 RUN set -eux; \
-    paseo_version="$(jq -r '.version // "unknown"' \
-        /usr/local/lib/node_modules/@getpaseo/cli/package.json)"; \
-    printf '{"version":"%s","paseo":"%s"}\n' "${BUILD_VERSION}" "$paseo_version" \
+    pkg() { jq -r '.version // "unknown"' "/usr/local/lib/node_modules/$1/package.json"; }; \
+    jq -n \
+        --arg version "${BUILD_VERSION}" \
+        --arg paseo "$(pkg @getpaseo/cli)" \
+        --arg claude "$(pkg @anthropic-ai/claude-code)" \
+        --arg codex "$(pkg @openai/codex)" \
+        --arg opencode "$(pkg opencode-ai)" \
+        --arg copilot "$(pkg @github/copilot)" \
+        --arg gemini "$(pkg @google/gemini-cli)" \
+        --slurpfile tools /etc/ha-paseo-tools.json \
+        '{$version, $paseo, agents: {$claude, $codex, $opencode, $copilot, $gemini}} + $tools[0]' \
         > /etc/ha-paseo-release; \
+    rm -f /etc/ha-paseo-tools.json; \
     cat /etc/ha-paseo-release
 
 LABEL \

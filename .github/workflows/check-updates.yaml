@@ -1,10 +1,11 @@
 ---
 name: Check for upstream updates
 
-# Everything this add-on ships is pinned, which is good for reproducibility and
-# bad for staleness -- nothing tells you when Paseo or an agent CLI has moved on.
-# This does: it compares the pins against upstream weekly and keeps a single
-# issue up to date with whatever has fallen behind.
+# Paseo is the one thing this add-on pins (build.yaml); the agent CLIs, the HA
+# and GitHub CLIs and the Debian packages are resolved to latest on every build,
+# so there is nothing to compare for them. This compares the Paseo pin against
+# upstream weekly and keeps a single issue up to date if it has fallen behind --
+# a fallback for when upstream-release.yaml is stuck.
 
 on:
   schedule:
@@ -28,10 +29,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          pinned_arg() {   # read an ARG default out of the Dockerfile
-            sed -n "s/^ARG $1=//p" paseo/Dockerfile | head -1
-          }
-          npm_latest() { npm view "$1" version 2>/dev/null || echo "?"; }
           gh_latest()  { gh api "repos/$1/releases/latest" --jq '.tag_name' 2>/dev/null || echo "?"; }
 
           # Paseo itself is pinned as a tag in build.yaml.
@@ -46,13 +43,6 @@ jobs:
           }
 
           add_row "paseo (build.yaml)"        "$paseo_pinned"                      "$paseo_latest"
-          add_row "@anthropic-ai/claude-code" "$(pinned_arg CLAUDE_CODE_VERSION)"  "$(npm_latest @anthropic-ai/claude-code)"
-          add_row "@openai/codex"             "$(pinned_arg CODEX_VERSION)"        "$(npm_latest @openai/codex)"
-          add_row "opencode-ai"               "$(pinned_arg OPENCODE_VERSION)"     "$(npm_latest opencode-ai)"
-          add_row "@github/copilot"           "$(pinned_arg COPILOT_VERSION)"      "$(npm_latest @github/copilot)"
-          add_row "@google/gemini-cli"        "$(pinned_arg GEMINI_CLI_VERSION)"   "$(npm_latest @google/gemini-cli)"
-          add_row "home-assistant/cli"        "$(pinned_arg HA_CLI_VERSION)"       "$(gh_latest home-assistant/cli)"
-          add_row "cli/cli (gh)"              "$(pinned_arg GH_CLI_VERSION)"       "$(gh_latest cli/cli | sed 's/^v//')"
 
           if [ -z "$rows" ]; then
             echo "everything is current"
@@ -67,11 +57,6 @@ jobs:
             echo "| Component | Pinned | Latest |"
             echo "| --- | --- | --- |"
             printf '%s' "$rows"
-            echo
-            echo "To update: bump the value in \`paseo/Dockerfile\`, add a"
-            echo "\`CHANGELOG.md\` entry, then \`./scripts/release.sh <version>\` -- a patch"
-            echo "bump for pin-only changes. Do **not** edit \`version\` in"
-            echo "\`paseo/config.yaml\`; the tag is the source of truth and CI writes it."
             echo
             echo "The \`paseo\` row should normally be handled by the upstream-release"
             echo "workflow, which repins and releases on its own within six hours of a"

@@ -2,7 +2,8 @@
 #
 # Update the agent CLIs without waiting for an add-on release.
 #
-# The image ships pinned versions in /usr/local. This installs newer ones into
+# The image ships the versions that were newest when it was built, in
+# /usr/local. This installs newer ones into
 # /data/home/.npm-global, which comes first on PATH and lives on the persistent
 # volume -- so an update survives restarts AND add-on updates.
 #

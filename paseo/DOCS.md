@@ -604,9 +604,13 @@ Three separate things move at very different speeds, so they update differently.
 
 ### The agent CLIs (claude, codex, opencode, copilot, gemini)
 
-These release constantly — Claude Code often ships several times a week — and
-waiting on an add-on release for each one would be absurd. The image ships
-**pinned** versions, and you can move ahead of them yourself.
+Every image build installs the **newest release** of each agent CLI, along with
+the newest `ha` and `gh` CLIs and current Debian packages, so each add-on update
+brings them up to date. `ha-paseo-doctor` lists the exact versions a given image
+carries.
+
+These release constantly — Claude Code often ships several times a week — so
+between add-on releases you can move ahead of the image yourself.
 
 From a terminal pane in the Paseo UI:
 
@@ -629,8 +633,8 @@ version you actually run. `update-agents status` flags this explicitly, and
 your Claude Code version, this is why.
 
 Set `auto_update_agents: true` to run `update-agents all` on every boot. It is
-off by default: it makes startup slow and network-dependent, and gives up
-reproducibility.
+off by default: it makes startup slow and network-dependent, and like any
+override it stops add-on updates from changing the version you run.
 
 ### Paseo itself
 
@@ -672,15 +676,19 @@ ha-paseo-doctor | head -4      # `version` (add-on) and `paseo` (what shipped)
 
 ### Knowing when anything is behind
 
-Everything being pinned is good for reproducibility and bad for staleness —
-nothing would tell you the world had moved on. A scheduled workflow
-(`.github/workflows/check-updates.yaml`) runs weekly, compares every pin against
-upstream, and keeps a single **"Upstream updates available"** issue up to date
-with a table of what is behind. Run it on demand from the Actions tab.
+Only Paseo is pinned, because the add-on version names it. A scheduled workflow
+(`.github/workflows/check-updates.yaml`) runs weekly, compares that pin against
+upstream, and keeps a single **"Upstream updates available"** issue up to date if
+it is behind — a fallback for when the auto-release workflow is stuck. Run it on
+demand from the Actions tab.
 
-Why pin at all? Unpinned `npm install -g` means rebuilding add-on version
-`0.4.0-1` in three months silently produces different agent versions — the
-version number stops meaning anything.
+Everything else resolves to latest at build time. The release build resolves
+each version once and passes it to both architecture builds, so `amd64` and
+`aarch64` images of one add-on version carry the same agents, and it builds with
+`--pull --no-cache` so no layer is reused from an older build. A published image
+never changes after that; what it contains is recorded in
+`/etc/ha-paseo-release`. To build with an exact version instead, pass it as a
+build arg, e.g. `--build-arg CLAUDE_CODE_VERSION=2.1.300`.
 
 ## Updating Paseo
 

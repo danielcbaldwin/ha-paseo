@@ -268,8 +268,8 @@ if [[ -n "$extra_npm" ]]; then
 fi
 
 # Opt-in: pull the latest agent CLIs at every boot instead of using the versions
-# pinned in the image. Costs a slow, network-dependent start and gives up
-# reproducibility, which is why it is off by default.
+# the image was built with. Costs a slow, network-dependent start, which is why
+# it is off by default.
 if [[ "$auto_update_agents" == "true" ]]; then
     log "auto_update_agents is on; updating agent CLIs to latest"
     gosu "${PASEO_UID}:${PASEO_GID}" /usr/local/bin/update-agents all \

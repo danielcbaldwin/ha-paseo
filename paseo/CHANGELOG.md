@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0-2
+
+- **Agent CLIs and tools track upstream.** Every image build now installs the
+  newest release of `claude`, `codex`, `opencode`, `copilot` and `gemini`, the
+  newest `ha` and `gh` CLIs, and runs `apt-get upgrade` on the base image,
+  instead of versions pinned in the Dockerfile. CI resolves each version once so
+  both architectures match, and builds with `--pull --no-cache`.
+- `/etc/ha-paseo-release` records the agent, `ha` and `gh` versions in the
+  image, and `ha-paseo-doctor` shows them.
+- The weekly check-updates issue now covers only the Paseo pin.
+
 ## 0.10.0-1
 
 - **Paseo 0.10.0.** The base image moved from `0.9.2` to `0.10.0`

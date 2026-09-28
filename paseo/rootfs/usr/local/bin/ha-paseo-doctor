@@ -27,6 +27,9 @@ info "version   $(jq -r '.version // "?"' /etc/ha-paseo-release 2>/dev/null || e
 # the bundled daemon version too -- it is the first thing to check against an
 # upstream bug report.
 info "paseo     $(jq -r '.paseo // "?"' /etc/ha-paseo-release 2>/dev/null || echo "?")"
+# Agent and tool versions are resolved to the newest release at build time, so
+# the image's record is the only place that says which ones this build carries.
+info "image     $(jq -r '[(.agents // {} | to_entries[] | "\(.key) \(.value)"), "ha \(.ha_cli // "?")", "gh \(.gh // "?")"] | join(", ")' /etc/ha-paseo-release 2>/dev/null || echo "?")"
 info "listen    ${PASEO_LISTEN:-unset}"
 info "home      ${HOME:-unset}"
 if [[ -f "$OPTIONS" ]]; then

@@ -16,10 +16,6 @@ build_from:
   amd64: ghcr.io/getpaseo/paseo:0.10.0
   aarch64: ghcr.io/getpaseo/paseo:0.10.0
 
-args:
-  HA_CLI_VERSION: "5.3.0"
-  GH_CLI_VERSION: "2.97.0"
-
 labels:
   org.opencontainers.image.source: https://github.com/danielcbaldwin/ha-paseo
   org.opencontainers.image.licenses: MIT

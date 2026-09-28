@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1-1
+
+- **Paseo 0.10.1.** The base image moved from `0.10.0` to `0.10.1`
+  (`sha256:4dad5ba8f36c8bad9caec033b72d11b3c14a4a5040c07fafe577e8b817814b3b`). Released automatically; the add-on itself is
+  unchanged since 0.10.0-2.
+
 ## 0.10.0-2
 
 - **Agent CLIs and tools track upstream.** Every image build now installs the

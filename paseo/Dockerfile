@@ -10,8 +10,8 @@
 # Overridden by build.yaml's build_from under the Home Assistant builder. Kept in
 # step with it by .github/workflows/upstream-release.yaml, which matches on the
 # `<version> -> sha256:<digest>` shape of the comment below.
-# 0.17.5 -> sha256:321c8361600602c6e1f1c7a492efc0efa251609730b4086c2f973ad3f14f848d
-ARG BUILD_FROM=ghcr.io/getpaseo/paseo:0.17.5
+# 0.17.6 -> sha256:bb15466afcb2668a35b54c83a175880b662da8450db239528f6614dacf49b38e
+ARG BUILD_FROM=ghcr.io/getpaseo/paseo:0.17.6
 FROM ${BUILD_FROM}
 
 ARG BUILD_ARCH=amd64
